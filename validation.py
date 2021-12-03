@@ -127,7 +127,7 @@ def calculatePlaqueCountsPerWSI(task, save_images=False):
                 # Create plot
                 img = np.array(Image.open(path))
                 plt.figure()
-                fig, ax = plt.subplots(1, figsize=(19.95, 19.95))
+                fig, ax = plt.subplots(1, figsize=(6.65, 6.65))
                 ax.imshow(img)
                 # Draw bounding boxes and labels of detections
                 if detections is not None:
@@ -165,7 +165,6 @@ def calculatePlaqueCountsPerWSI(task, save_images=False):
                             verticalalignment="top",
                             bbox={"color": color, "pad": 0},
                         )
-
                     # Save generated image with detections
                     plt.axis("off")
                     plt.gca().xaxis.set_major_locator(NullLocator())
@@ -533,7 +532,6 @@ def speedCheck(use_gpu=True, include_merge_and_filter=True):
         print("avg time per WSI: ", model_time_spent / float(len(WSI_directories)))
         print("avg time per 1536 image: ", model_time_spent / float(num_1536))
     pickle.dump(time_dict, open("pickles/run_times_use_gpu_{}_{}.pkl".format(use_gpu, hostname), "wb"))
-
 
 
 calculatePlaqueCountsPerWSI(task="lise dataset")

@@ -24,6 +24,9 @@ from matplotlib.ticker import NullLocator
 import pickle
 from core import *
 
+shutil.rmtree("output/")
+os.mkdir("output/")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_folder", type=str, default="data/samples", help="path to dataset")
@@ -114,8 +117,10 @@ if __name__ == "__main__":
         # Create plot
         img = np.array(Image.open(path))
         plt.figure()
-        fig, ax = plt.subplots(1, figsize=(19.95, 19.95)) ##dan's edit - force plotted image to be 1536 x 1536 pixels. not sure why 15.36 does not work... 20.36 -> 1567px; 20 -> 1539 x 1540px; 19.9 -> 1532 x 1532px
-        # fig, ax = plt.subplots(1)
+        ##dan's edit - make image 1536 x 1536 pixels. Exact number necessary will vary based on screen dpi.
+        fig, ax = plt.subplots(1, figsize=(6.65, 6.65))  
+
+
         ax.imshow(img)
 
         # Draw bounding boxes and labels of detections

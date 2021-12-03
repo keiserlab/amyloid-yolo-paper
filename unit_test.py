@@ -27,6 +27,35 @@ class DataSetTests(unittest.TestCase):
         train_images, valid_images = set(train_images), set(valid_images)
         self.assertTrue(len(train_images.intersection(valid_images)) == 0)
 
+    def testTrainValidConsistencyForBothTrainingIterations(self):
+        """
+        Makes sure that the train.txt and valid.txt for the first phase of training (before model bootstrapping) is equivalent to
+        train.txt and valid.txt used during the second phase of training
+        """
+        directories = ["data/custom/", "original_data/"]
+        train1, train2, valid1, valid2 = [], [], [], []
+        for directory in directories:
+            with open(directory + "train.txt") as file:
+                lines = file.readlines()
+                for line in lines:
+                    line = line.replace("\n", "")
+                    if directory == "data/custom/":
+                        train1.append(line)
+                    if directory ==  "original_data/":
+                        train2.append(line)
+            file.close()
+            with open(directory + "valid.txt") as file:
+                lines = file.readlines()
+                for line in lines:
+                    line = line.replace("\n", "")
+                    if directory == "data/custom/":
+                        valid1.append(line)
+                    if directory ==  "original_data/":
+                        valid2.append(line)
+            file.close()
+        self.assertTrue(set(train1) == set(train2))
+        self.assertTrue(set(valid1) == set(valid2))
+
     def testValidationImages(self):
         """
         Various tests to make sure our validation set is constructed correct

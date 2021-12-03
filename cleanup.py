@@ -30,9 +30,22 @@ from core import *
 # assert preProcess(weak_label=False) == mapp
 
 
+for pickle_file in os.listdir("pickles/"):
+	if ".pk" in pickle_file:
+		print(pickle_file)
+		mapp = pickle.load(open("pickles/" + pickle_file, "rb"))
+		for key in mapp.keys():
+			if "srv" in key:
+				print(pickle_file, "has srv in it")
+				break
 
-mapp = pickle.load(open("pickles/Lise_human_annotation_1536_plaque_counts_dictionary.pkl", "rb"))
-print(mapp)
+# new_mapp = {}
+# old_mapp = pickle.load(open("pickles/temporary_WSI_map.pkl", "rb"))
+# for key in old_mapp.keys():
+# 	img_name = key.replace("/srv/nas/mk1/users/dwong/", "data/")
+# 	new_mapp[img_name] = old_mapp[key]
+# pickle.dump(new_mapp, open("pickles/temporary_WSI_map.pkl", "wb"))
+
 
 # df = pd.read_csv("csvs/prospective_validation_images.csv")
 # for index, row in df.iterrows():

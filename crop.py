@@ -2,6 +2,7 @@
 Script for processing the WSIs used for the CERAD analysis
 The WSIs are pulled from Ziqi Tang's Nature Comm study:
 https://github.com/keiserlab/plaquebox-paper
+Use the environment pyvips.yml
 """
 
 import pyvips as Vips

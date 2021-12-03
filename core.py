@@ -214,21 +214,6 @@ def filterMapToGetCAATypes(mapp):
                 continue
     return new_mapp
 
-def seedSamplesFolder(sample_size=25):
-    """
-    Take SAMPLE_SIZE images from valid.txt file and copy them over to data/amyloid_samples/ directory
-    """
-    shutil.rmtree("data/amyloid_samples/")
-    os.mkdir("data/amyloid_samples/")
-    images = os.listdir("data/custom/images/")
-    with open("data/custom/valid.txt","r") as f:
-        lines = f.readlines()
-        lines = lines[0:sample_size]
-        for line in lines:
-            line = line.replace("\n", "")
-            img_name = line[line.rfind("/") + 1: ]
-            shutil.copy(line, "data/amyloid_samples/" + img_name)
-
 def seedTestFolder():
     """
     seeds data/amyloid_test/ which will contain all of the raw un-annotated test images

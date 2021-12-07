@@ -104,6 +104,7 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
     """
     Loads annotations and predictions dictionaries with format key: image name, value:  value: list of (bbox coordinate, class) tuples
     Saves a table df PRC_tables/PRC_table_{}_iou_{}_{}.csv.format(annotator, iou_threshold, amyloid_class)
+    Also saves a dictionary called img_precision_maps/precision_img_map_{}_{}.format(annotator, iou_threshold) mapping key: imagename, to value: precision  
     """
     annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
     predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
@@ -114,6 +115,8 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
     table_CAA = []
     num_CAA_labels = 0
     num_Cored_labels = 0
+    precision_img_map_cored = {}
+    precision_img_map_CAA = {}
 
     for img_name in annotations.keys(): 
         outputs = [] ##list of model detections for this particular image
@@ -145,6 +148,7 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
         
         ##from list of model detections, determine which are TP and which are FP, and add them to the table with headers conf, TP, FP
         TPs = getTPs(outputs, labels, iou_threshold, Pascal_VOC_scheme=True)
+        cored_TP, cored_FP, CAA_TP, CAA_FP = 0,0,0,0 ##per image basis
         for i in range(0, len(TPs)):
             detection = outputs[i]
             conf = detection[4]
@@ -152,14 +156,29 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
             if TPs[i] == 1: #TP
                 if cls_pred == 1: ##TP and cored
                     table_cored.append((conf, 1, 0))
+                    cored_TP += 1
                 else: ##TP and CAA
                     table_CAA.append((conf, 1, 0))
+                    CAA_TP += 1
             else: #FP 
                 if cls_pred == 1: ##FP and cored
                     table_cored.append((conf, 0, 1))
+                    cored_FP += 1
                 else:##FP and CAA
                     table_CAA.append((conf, 0, 1))
-    
+                    CAA_FP += 1
+        if cored_TP + cored_FP > 0: #must have a prediction to be valid
+            precision_img_map_cored[img_name] = cored_TP / (float(cored_TP + cored_FP))
+        else:
+            precision_img_map_cored[img_name] = -1
+        if CAA_TP + CAA_FP > 0:
+            precision_img_map_CAA[img_name] = CAA_TP / (float(CAA_TP + CAA_FP))
+        else:
+            precision_img_map_CAA[img_name] = -1
+
+    pickle.dump(precision_img_map_cored, open("pickles/img_precision_maps/precision_img_map_Cored_{}_{}.pkl".format(annotator, round(iou_threshold,2)), "wb"))
+    pickle.dump(precision_img_map_CAA, open("pickles/img_precision_maps/precision_img_map_CAA_{}_{}.pkl".format(annotator, round(iou_threshold,2)), "wb"))
+
     ##make the table into a dataframe, and compute the relevant columns
     for amyloid_class in ["Cored", "CAA"]:
         if amyloid_class == "Cored":
@@ -201,6 +220,16 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
         table['Precision'] = precision
         table['Recall'] = recall
         table.to_csv("PRC_tables/PRC_table_{}_iou_{}_{}.csv".format(annotator, round(iou_threshold, 1), amyloid_class))
+
+def findLowPerformanceImages(amyloid_class, annotator, iou_threshold=0.5):
+    """
+    Will print a sorted list of images with worst precision to images with greatest precision
+    for given amyloid_class, evaluated against annotator and an iou_threshold
+    """
+    precision_img_map = pickle.load(open("pickles/img_precision_maps/precision_img_map_{}_{}_{}.pkl".format(amyloid_class, annotator, round(iou_threshold,2)), "rb"))
+    sorted_list = sorted(precision_img_map.items(), key=lambda item: item[1])
+    sorted_list = [x for x in sorted_list if x[1] != -1] ##exclude images with no detections
+    print(sorted_list)
 
 def getAnnotationOverlaps(annotator="NP1", iou_threshold=0.5):
     """
@@ -650,7 +679,7 @@ def plotAllAnnotations():
 
 def plotImageComparisons(overlay_labels=True, overlay_predictions=True):
     """
-    Will plot the image model prediction boxes and also the annotation boxes from annotator
+    Will plot the image model prediction boxes and also the annotation boxes from each annotator
     over the entire prospective validation set for each annotator
     saves images to output/{annotator}/ directory 
     """
@@ -824,28 +853,31 @@ shutil.rmtree("output/")
 os.mkdir("output/")
 
 
-convertJSONtoImgDict()
-runModelOnValidationImages()
+# convertJSONtoImgDict()
+# runModelOnValidationImages()
 
-createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=0.5)
+# createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=0.5)
 
 for annotator in ["consensus"]:# + ["merged"] + ["NP{}".format(i) for i in range(1, 5)]:
     for iou_threshold in np.arange(0.1, 1.0, 0.1):
         compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=annotator)
-    plotPRC(annotator=annotator)
-    getAnnotationOverlaps(annotator, iou_threshold=0.05)
+    # plotPRC(annotator=annotator)
+    # getAnnotationOverlaps(annotator, iou_threshold=0.05)
 
-# plotImageComparisons(overlay_labels=True, overlay_predictions=False)
+
+findLowPerformanceImages("Cored", "consensus", iou_threshold=0.5)
+
+plotImageComparisons(overlay_labels=True, overlay_predictions=True)
 # plotAllAnnotations()
 
-getInterraterAgreement(iou_threshold=0.5)
-plotInterraterAgreement()
+# getInterraterAgreement(iou_threshold=0.5)
+# plotInterraterAgreement()
 
-getPrecisionsOfAnnotatorsRelativeToEachOther()
-plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
+# getPrecisionsOfAnnotatorsRelativeToEachOther()
+# plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
 
-plotAPs(plotAvgOverlay=True)
-plotTimeChart()
+# plotAPs(plotAvgOverlay=True)
+# plotTimeChart()
 
 
 

@@ -215,64 +215,7 @@ def plotCERADVsCounts(plaque_type="Cored", CERAD_type="CERAD"):
     plt.title("CERAD Correlation with Predicted {} Counts".format(plaque_type))
     plt.gcf().subplots_adjust(bottom=0.14, top=.89)
     plt.savefig("figures/CERAD_correlation_{}_{}.png".format(plaque_type, CERAD_type), dpi=300)
-
-def getWSIsWithMostCAAs(n=1):
-    """
-    Runs through the consensus of 2 annotations for Lise's dataset,
-    For each stain, gets the top n WSIs as a list of strings for the WSIs with the greatest sum of positive annotations sum(lepto, parenchymal, capillary)
-    Constructs a dictionary with key: stain, value: list of top n WSIs for that stain 
-    Returns the final list of WSI names (4 stains x n total)
-    """
-    df = pd.read_csv("csvs/consensus_2_complete.csv")
-    ##dictionary of key: WSI to value: sum of leptomeningeal, parenchymal, capillary
-    WSI_dict = {WSI : 0 for WSI in df["source"]}
-    for index, row in df.iterrows():
-        WSI_dict[row["source"]] += row["leptomeningeal"] + row["parenchymal"] + row["capillary"]
-    ##list of (stain, keyword that indicates stain) tuples
-    stain_keywords = [("6E10", "beta_amyloid"), ("4G8", "4G8"), ("ABeta40", "Abeta40"), ("ABeta42", "Abeta42")]
-    ##dictionary of key: stain, value: list of (WSI name, CAA sum for WSI) tuples
-    stain_dict = {stain_keyword[0]: [(k, v) for k, v in sorted(WSI_dict.items(), key=lambda item: item[1]) if stain_keyword[1] in k] for stain_keyword in stain_keywords}
-    ##only keep top n
-    stain_dict = {stain: stain_dict[stain][-n:] for stain in stain_dict}
-    final_list = [tup[0] for stain in ["6E10", "4G8", "ABeta40", "ABeta42"] for tup in stain_dict[stain] ]
-    return final_list
-
-def createPlaqueCountsDictionaryByHumanAnnotation(): 
-    """
-    Creates a dictionary with key: WSI, key: 1536 x 1536 pixel image: value: count of CAA (+) human annotations
-    """
-    ##first create map from key: 256px imagename to value: (source, tile_column, tile_row)
-    details = pd.read_csv("csvs/image_details_lise.csv")
-    map_256 = {}
-    for index, row in details.iterrows():
-        map_256[row["imagename"]] = (row["source"], row["tile_column"], row["tile_row"])
-    pickle.dump(map_256, open("pickles/Lise_human_annotation_details_locations.pkl", "wb")) 
-
-    ##next add (source, tile_column, tile_row) to annotations df
-    df = pd.read_csv("csvs/consensus_2_complete.csv")
-    df["source"] = ["" for i in range(0, len(df))]
-    df["tile_column"] = ["" for i in range(0, len(df))]
-    df["tile_row"] = ["" for i in range(0, len(df))]
-    for index, row in df.iterrows():
-        location_info = map_256[row["tilename"]]
-        df.at[index, "source"] = location_info[0]
-        df.at[index, "tile_column"] = location_info[1]
-        df.at[index, "tile_row"] = location_info[2]
-
-    ##create final dictionary
-    return_dictionary = {WSI: {} for WSI in list(set(df["source"]))}
-    ##reset in case this was made before
-    pickle.dump(return_dictionary, open("pickles/Lise_human_annotation_1536_plaque_counts_dictionary.pkl", "wb")) 
-
-    for index, row in df.iterrows():
-        path = "data/MRPI_tiles/" + row["source"] + "/0/" + str(row["tile_row"]) + "/" + str(row["tile_column"]) + ".jpg"
-        CAA_sum = int(row["leptomeningeal"] + row["parenchymal"] + row["capillary"])
-        if path not in return_dictionary:
-            return_dictionary[row["source"]][path] = CAA_sum
-        else:
-            return_dictionary[row["source"]][path] += CAA_sum
-    pickle.dump(return_dictionary, open("pickles/Lise_human_annotation_1536_plaque_counts_dictionary.pkl", "wb")) 
-
+ 
 def getStain(string):
     """
     Given string, will return the stain
@@ -290,162 +233,6 @@ def getStain(string):
         raise Exception("cannot determine stain from string: {}".format(string))
     else:
         return stain 
-
-def pullValidationImages():
-    """
-    Method to write a dataframe with a list of all of the validation images we'll use for the study
-    For each of the 4 stains:
-        50 distinct fields total (1536 x 1536 px):
-            select top 12 WSIs based on summation of human CAA counts
-            for each slide:
-                pick field with largest count of CAA (+) model predictions
-                pick field with largest count of CAA (+) human annotations 
-                pick top 2 fields with largest count of Cored (+) model predictions
-            from 2 other WSIs outside original 12: pick 2 more fields completely at random / or pick 2 more fields with no CAA (+) human annotation
-    """
-    ## ongoing list of all images that are going to be part of the validation set 
-    selected_images = [] 
-    ## write DF to keep track of all relevant info (like coming from model enrichment or from human annotation)
-    return_df = pd.DataFrame()
-
-    ## grab images selected by model predictions first
-    dictionary_1536 = pickle.load(open("pickles/Lise_1536_plaque_counts_dictionary.pkl", "rb"))
-
-    ##now let's grab the images selected by greatest count of human annotations for only CAA (Cored annotations don't exist!)
-    top_12 = getWSIsWithMostCAAs(n=12)
-    human_annotations_dict = pickle.load(open("pickles/Lise_human_annotation_1536_plaque_counts_dictionary.pkl", "rb"))
-    relevant_slides = {k: human_annotations_dict[k] for k in human_annotations_dict.keys() if k in top_12}
-    
-    for key in relevant_slides.keys():
-        relevant_slides[key] = sorted(relevant_slides[key].items(),  key=lambda item: item[1])
-
-    ## list for images to pull
-    human_selected = []
-    for key in relevant_slides.keys():
-        ## if there is a tie for highest plaque count, we will select one of the contenders at random
-        highest_plaque_count = relevant_slides[key][-1][1]
-        contenders = []
-        second_best_contenders = []
-        ## iterate over the list of fields for this WSI to find all of the contenders
-        for i in range(len(relevant_slides[key]) -1, -1, -1):
-            plaque_count = relevant_slides[key][i][1]
-            if plaque_count != highest_plaque_count:
-                second_highest_plaque_count = relevant_slides[key][i][1]
-                for j in range(i, -1 , -1):
-                    plaque_count = relevant_slides[key][j][1]
-                    if plaque_count == second_highest_plaque_count:
-                        second_best_contenders.append(relevant_slides[key][j][0])
-                    else:
-                        break
-                break
-            else:
-                contenders.append(relevant_slides[key][i][0])
-        ## shuffle the list of contenders and select one at random
-        random.shuffle(contenders)
-        random.shuffle(second_best_contenders)
-        contenders = [x for x in contenders if x not in selected_images]
-        second_best_contenders = [x for x in second_best_contenders if x not in selected_images]        
-        if len(contenders) != 0:
-            human_selected.append(contenders[0])
-            selected_images.append(contenders[0])
-        else:
-            human_selected.append(second_best_contenders[0])
-            selected_images.append(second_best_contenders[0])
-    ##write to df 
-    for img_name in human_selected:
-        return_df = return_df.append({"Image Name" : img_name, "Stain" : getStain(img_name), "Selected by" : "Human", "Amyloid Class" : "CAA"}, 
-            ignore_index = True)
-
-    ## first CAA, then Cored 
-    for amyloid_type in ["CAA", "Cored"]:
-        ## most of dictionary_1536 is empty (except 48 slides) because we did not process them to save compute
-        non_empties = {k: dictionary_1536[k] for k in dictionary_1536.keys() if len(dictionary_1536[k]) > 0}
-        ## sort by count of amyloid_type (largest at the back of the list)
-        for key in non_empties.keys():
-            non_empties[key] = sorted(non_empties[key].items(),  key=lambda item: item[1][amyloid_type])
-        ## list for images to pull, select field(s) with greatest plaque count
-        model_selected = []
-        for key in non_empties.keys():
-
-            ##shuffle the entries of non_empties[key], but preserve being sorted by count
-            counts_dict = {} #key: count, value: list of (field name, {"CAA": count, "Cored":count}
-            for i in range(0, len(non_empties[key])):
-                plaque_count = non_empties[key][i][1][amyloid_type]
-                if plaque_count not in counts_dict:
-                    counts_dict[plaque_count] = [non_empties[key][i]]
-                else:
-                    counts_dict[plaque_count].append(non_empties[key][i])
-            ##shuffle the lists for each count
-            for count in counts_dict:
-                random.shuffle(counts_dict[count])
-            ##sort by key (count), count_items is list of tuples: [(count, list of (field name, {"CAA": count, "Cored":count})]
-            counts_items = sorted(counts_dict.items())
-            ##our list we're going to construct that is shuffled within each count but still sorted by count
-            shuffled_ranked_list = []
-            ## iterate over our counts_items
-            for i in range(0, len(counts_items)):
-                ## iterate over list of (field name, {"CAA": count, "Cored":count})
-                for item in counts_items[i][1]:
-                    shuffled_ranked_list.append(item)
-            non_empties[key] = shuffled_ranked_list
-            ## count to keep track of how many we've added to selected_images
-            added = 0
-            for i in range(len(non_empties[key]) - 1, -1, -1):
-                field = non_empties[key][i][0]
-                if field not in selected_images:
-                    model_selected.append(field)
-                    selected_images.append(field)
-                    added += 1
-                if amyloid_type == "CAA" and added == 1: ##we only want one model selected for CAA
-                    break
-                if amyloid_type == "Cored" and added == 2: ##we want two model selected for Cored 
-                    break
-        #write to df 
-        for img_name in model_selected:
-            return_df = return_df.append({"Image Name" : img_name, "Stain" : getStain(img_name), "Selected by" : "Model", "Amyloid Class" : amyloid_type}, 
-                ignore_index = True)
-   
-    ##finally let's pull the 8 WSIs (2 for each of 4 stain types) that are outside the top 12 and select completely at random (remember that these WSIs don't have any fields instantiated in their dict to save on compute)
-    outside_top_12 = [k for k in dictionary_1536.keys() if k not in top_12]
-    outside_top_12.remove("CAA_img_Daniel_project.csv")
-    random.shuffle(outside_top_12)
-    stains = ["4G8", "ABeta42", "ABeta40", "6E10"]
-    ## dict with key: stain to value: list of fields
-    stains_dict = {stain: [] for stain in stains}
-    for WSI in outside_top_12:
-        files = []  
-        stain = getStain(WSI)
-        if len(stains_dict[stain]) < 2:
-            ##get fields of WSI
-            dirName = "data/MRPI_tiles/{}/0/".format(WSI)
-            for (dirpath, dirnames, filenames) in os.walk(dirName):
-                filenames = [dirpath + "/" + f for f in filenames]
-                files += filenames
-            random.shuffle(files)
-            stains_dict[stain].append(files.pop())
-            continue 
-    ##final list of randomly selected images
-    random_selected = []
-    for stain in stains_dict:
-        random_selected += stains_dict[stain]
-
-    ##write to df 
-    for img_name in random_selected:
-        return_df = return_df.append({"Image Name" : img_name, "Stain" : getStain(img_name), "Selected by" : "Random", "Amyloid Class" : "N/A"}, 
-            ignore_index = True)
-
-    return_df.to_csv("csvs/prospective_validation_images.csv")
-
-def createValidationImagesDirectory():
-    """
-    Creates and fills the directory prospective_validation_images/
-    """
-    df = pd.read_csv("csvs/prospective_validation_images.csv")
-    if os.path.isdir("prospective_validation_images/"):
-        shutil.rmtree("prospective_validation_images/")
-    os.mkdir("prospective_validation_images/")
-    for path in df["Image Name"]:
-        shutil.copy(path, "prospective_validation_images/{}".format(path.replace("/", "_")))
 
 def speedCheck(use_gpu=True, include_merge_and_filter=True):
     """
@@ -534,23 +321,14 @@ def speedCheck(use_gpu=True, include_merge_and_filter=True):
     pickle.dump(time_dict, open("pickles/run_times_use_gpu_{}_{}.pkl".format(use_gpu, hostname), "wb"))
 
 
-calculatePlaqueCountsPerWSI(task="lise dataset")
-# calculatePlaqueCountsPerWSI(task="CERAD all", save_images=False)
+calculatePlaqueCountsPerWSI(task="CERAD all", save_images=False)
+# calculatePlaqueCountsPerWSI(task="lise dataset")
 # plotCERADVsCounts(plaque_type = "Cored", CERAD_type="CERAD")
-# plotCERADVsCounts(plaque_type = "CAA", CERAD_type="CERAD")
 # plotCERADVsCounts(plaque_type = "Cored", CERAD_type="Cored_MTG")
 # plotCERADVsCounts(plaque_type = "CAA", CERAD_type="CAA_MTG")
-
-# createPlaqueCountsDictionaryByHumanAnnotation()
-
 # speedCheck(use_gpu=True)
 # speedCheck(use_gpu=False)
 
-
-
-##CAREFUL ABOUT RUNNING THESE, DON'T WANT TO OVERWRITE 
-# pullValidationImages()
-# createValidationImagesDirectory()
 
 
 

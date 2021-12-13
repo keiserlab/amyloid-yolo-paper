@@ -76,7 +76,7 @@ def preProcess(weak_label=False):
 
 def get256Img(img, bbox_coord):
     """
-    Given a cv2 img, and a bbox_coordinate (top left x, top left y, width (x), height (y)) , will return a 256 x 256 cropped image that is centered on the bbox
+    Given a cv2 img that is 1536 x 1536 pixels, and a bbox_coordinate (top left x, top left y, width (x), height (y)) , will return a 256 x 256 cropped image that is centered on the bbox
     """
     center_point = (int(bbox_coord[0] + (bbox_coord[2] / 2)), int(bbox_coord[1] + (bbox_coord[3] / 2)))
     x_left_valid = center_point[0] - 128 > 0 
@@ -461,5 +461,73 @@ def get_gpu_memory_map():
     gpu_memory = [int(x) for x in result.strip().split('\n')]
     gpu_memory_map = dict(zip(range(len(gpu_memory)), gpu_memory))
     return gpu_memory_map
+
+def IOU(boxA, boxB):
+    """
+    Given two bboxes as x1, y1, x2, y2 coordinates, will return the intersection over union
+    https://www.pyimagesearch.com/2016/11/07/intersection-over-union-iou-for-object-detection/
+    """
+    # determine the (x, y)-coordinates of the intersection rectangle
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
+    # compute the area of intersection rectangle
+    interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+    # compute the area of both the prediction and ground-truth
+    # rectangles
+    boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+    boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+    # compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the interesection area
+    iou = interArea / float(boxAArea + boxBArea - interArea)
+    # return the intersection over union value
+    return iou
+
+def getAccuracy(l1, l2):
+    """
+    Returns accuracy as a percentage between two lists, L1 and L2, of the same length
+    """
+    assert(len(l1) == len(l2))
+    return sum([1 for i in range(0, len(l1)) if l1[i] == l2[i]]) / float(len(l1))
+
+def getTPs(predictions, labels, iou_threshold, Pascal_VOC_scheme=True):
+    """
+    Given a list of [x1, y1, x2, y2, conf, cls_conf, cls_pred] predictions and 
+    [x1, y1, x2, y2, annotation_class] labels 
+    class must be last index
+    conf must be index 4 in predictions
+    box coords must be [0:4) for both predictions and labels
+    Will return a list of 1s and 0s such that 1 at index i indicates a TP at index i in predictions, else 0
+    If Pascal_VOC_scheme is true:
+        If there are multiple correct detections for a single label box, will take the highest confidence one as a TP, and the other as FP
+        i.e. Pascal VOC 2012 design schema - "multiple detections of the same object in an image were considered false detections e.g. 5 detections of a single object counted as 1 correct detection and 4 false detections"
+    Else:
+        multiple true detections are counted as TP
+    """
+    ##sort predictions by confidence in case we have multiple detections overlap with a single annotation label
+    TPs = [] ##list to return 
+    predictions = sorted(predictions, key=lambda x:x[4]) ##difference between conf and cls_conf? Repo seems to use index 4 (conf) for pred_score in funct get_batch_statistics
+    predictions.reverse() ##want sorted in decreasing order of confidence
+    TP_labels = [] ##to store labels that turn out to be TP_labels (used for Pascal VOC 2012 schema)
+    for prediction in predictions:
+        is_TP = False
+        box_pred = prediction[0:4]
+        for label in labels:
+            if label[-1] != prediction[-1]: #if classes don't match up, then skip and keep as FP 
+                continue
+            if Pascal_VOC_scheme and label in TP_labels: #if a label was already used as a TP, we don't want to double count so skip it and keep as FP
+                continue
+            box_label = label[0:4]
+            if IOU(box_pred, box_label) >= iou_threshold:
+                is_TP = True
+                TP_labels.append(label)
+                break
+        if is_TP:
+            TPs.append(1)
+        else:
+            TPs.append(0)
+    return TPs
 
 

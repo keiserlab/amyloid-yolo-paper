@@ -1,3 +1,27 @@
+from __future__ import division
+from models import *
+from utils.utils import *
+from utils.datasets import *
+from utils.augmentations import *
+from utils.transforms import *
+import os
+import sys
+import time
+import datetime
+import argparse
+from PIL import Image
+import torch
+import torchvision.transforms as transforms
+from torch.utils.data import DataLoader
+from torchvision import datasets
+from torch.autograd import Variable
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.ticker import NullLocator
+import pickle
+import json
+from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import average_precision_score
 import unittest
 from core import *
 
@@ -205,11 +229,61 @@ class ProspectiveValidationTests(unittest.TestCase):
         annotators = ["NP{}".format(i) for i in range(1, 5)]
         iou_threshold = 0.5
         predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
+        print(predictions)
         for annotator in annotators:
             for amyloid_class in ["Cored", "CAA"]:
                 mapp = pickle.load(open("pickles/img_precision_maps/precision_img_map_{}_{}_{}.pkl".format(amyloid_class, annotator, iou_threshold), "rb"))
                 mapp = {x: mapp[x] for x in mapp.keys() if mapp[x] == -1}
                 for img_name in mapp:
                     for tup in predictions[img_name]:
+                        self.assertTrue(tup[1] != amyloid_class)
+
+    def testCoredPredictionInvarianceToCAAFilter(self):
+        """
+        Test to ensure that filterDetectionsByCAAModel leaves Cored predictions untouched
+        """
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = Darknet("config/yolov3-custom.cfg", img_size=416).to(device)
+        model.load_state_dict(torch.load("checkpoints/yolov3_ckpt_105.pth"))
+        model.eval() 
+        dataloader = DataLoader(
+        ImageFolder("prospective_validation_images/", transform= \
+            transforms.Compose([DEFAULT_TRANSFORMS, Resize(416)])),
+        batch_size=8,
+        shuffle=False,
+        num_workers=12,
+        ) 
+        classes = load_classes("data/custom/classes.names")  # Extracts class labels from file
+        Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+        imgs = [] 
+        img_detections = []  # Stores detections for each image index
+        for batch_i, (img_paths, input_imgs) in enumerate(dataloader):
+            input_imgs = Variable(input_imgs.type(Tensor))
+            with torch.no_grad():
+                detections = model(input_imgs)
+                detections = non_max_suppression(detections, 0.8, 0.4) ##use conf threshold of 0.8 for detection 
+            imgs.extend(img_paths)
+            img_detections.extend(detections)
+        for img_i, (path, detections) in enumerate(zip(imgs, img_detections)):
+            img = np.array(Image.open(path))
+            if detections is None:
+                continue
+            detections = rescale_boxes(detections, 416, img.shape[:2])
+            detections = mergeDetections(detections) 
+            CAA_detections, Cored_detections = set(), set() 
+            for x1, y1, x2, y2, conf, cls_conf, cls_pred in detections:
+                if cls_pred == 0:
+                    CAA_detections.add((x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_conf.item(), cls_pred.item()))
+                if cls_pred == 1:
+                    Cored_detections.add((x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_conf.item(), cls_pred.item()))
+            detections_after_filter = filterDetectionsByCAAModel(path, detections, classes)
+            filter_CAA_count, filter_Cored_count = 0, 0 
+            filter_CAA_detections, filter_Cored_detections = set(), set()
+            for x1, y1, x2, y2, conf, cls_conf, cls_pred in detections_after_filter:
+                if cls_pred == 0:
+                    filter_CAA_detections.add((x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_conf.item(), cls_pred.item()))
+                if cls_pred == 1:
+                    filter_Cored_detections.add((x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_conf.item(), cls_pred.item()))
+            self.assertTrue(Cored_detections == filter_Cored_detections)
 
 unittest.main()

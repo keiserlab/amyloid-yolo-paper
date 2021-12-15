@@ -229,7 +229,6 @@ class ProspectiveValidationTests(unittest.TestCase):
         annotators = ["NP{}".format(i) for i in range(1, 5)]
         iou_threshold = 0.5
         predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
-        print(predictions)
         for annotator in annotators:
             for amyloid_class in ["Cored", "CAA"]:
                 mapp = pickle.load(open("pickles/img_precision_maps/precision_img_map_{}_{}_{}.pkl".format(amyloid_class, annotator, iou_threshold), "rb"))
@@ -277,7 +276,6 @@ class ProspectiveValidationTests(unittest.TestCase):
                 if cls_pred == 1:
                     Cored_detections.add((x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_conf.item(), cls_pred.item()))
             detections_after_filter = filterDetectionsByCAAModel(path, detections, classes)
-            filter_CAA_count, filter_Cored_count = 0, 0 
             filter_CAA_detections, filter_Cored_detections = set(), set()
             for x1, y1, x2, y2, conf, cls_conf, cls_pred in detections_after_filter:
                 if cls_pred == 0:
@@ -286,4 +284,55 @@ class ProspectiveValidationTests(unittest.TestCase):
                     filter_Cored_detections.add((x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_conf.item(), cls_pred.item()))
             self.assertTrue(Cored_detections == filter_Cored_detections)
 
+    def testgetTPsValidation(self):
+        """
+        Test to make sure that any prediction given a TP label has a match in the labels set with the same class and iou_threshold met,
+        also ensures that each label can be used for at most 1 TP record (no double dipping)
+        pulled from compareAnnotationsToPredictions() method
+        """
+        annotators = ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]
+        iou_thresholds = list(np.arange(0.1, 1.0, 0.1))
+        for annotator in annotators:
+            for iou_threshold in iou_thresholds:
+                if annotator == "consensus":
+                    annotations = pickle.load(open("prospective_annotations/consensus_annotations_iou_thresh_{}.pkl".format(round(iou_threshold, 2)), "rb"))
+                else:
+                    annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
+                predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
+                self.assertTrue(len(annotations) == len(predictions))
+                self.assertTrue(set(annotations.keys()) == set(predictions.keys()))
+                for img_name in annotations.keys(): 
+                    outputs = [] ##list of model detections for this particular image
+                    labels = [] ## list of annotations for this particular image
+                    for entry in predictions[img_name]: ##can be multiple boxes
+                        if len(entry) == 0:
+                            continue
+                        dictionary, class_label = entry[0], entry[1]
+                        x1 = dictionary['x1']
+                        y1 = dictionary['y1']
+                        x2 = dictionary['x2']
+                        y2 = dictionary['y2']
+                        conf = dictionary['conf']
+                        cls_conf = dictionary['cls_conf']
+                        cls_pred = dictionary['cls_pred']
+                        outputs.append([x1, y1, x2, y2, conf, cls_conf, cls_pred])
+                    for entry in annotations[img_name]:
+                        dictionary, class_label  = entry[0], entry[1]
+                        annotation_class = 1 if class_label == "Cored" else 0
+                        x1 = dictionary['x1']
+                        y1 = dictionary['y1']
+                        x2 = dictionary['x2']
+                        y2 = dictionary['y2']
+                        labels.append([x1, y1, x2, y2, annotation_class])  
+                    ##from list of model detections, determine which are TP and which are FP, and add them to the table with headers conf, TP, FP
+                    TPs = getTPs(outputs, labels, iou_threshold, Pascal_VOC_scheme=True)
+                    used_labels = []
+                    for i in range(0, len(TPs)):
+                        if TPs[i] == 1:
+                            iou_and_class_met = False
+                            for j in range(0, len(labels)):
+                                if labels[j][-1] == outputs[i][-1] and labels[j] not in used_labels and IOU(outputs[i][0:4], labels[j][0:4]) >= iou_threshold:
+                                    iou_and_class_met = True
+                                    used_labels.append(labels[j])
+                            self.assertTrue(iou_and_class_met) 
 unittest.main()

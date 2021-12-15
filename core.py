@@ -508,10 +508,15 @@ def getTPs(predictions, labels, iou_threshold, Pascal_VOC_scheme=True):
     """
     ##sort predictions by confidence in case we have multiple detections overlap with a single annotation label
     TPs = [] ##list to return 
-    predictions = sorted(predictions, key=lambda x:x[4]) ##difference between conf and cls_conf? Repo seems to use index 4 (conf) for pred_score in funct get_batch_statistics
-    predictions.reverse() ##want sorted in decreasing order of confidence
+    sorted_predictions = sorted(predictions, key=lambda x:x[4]) ##difference between conf and cls_conf? Repo seems to use index 4 (conf) for pred_score in funct get_batch_statistics
+    sorted_indices = sorted(range(len(predictions)), key=lambda k: predictions[k][4]) ##list of original indices 
+    sorted_predictions.reverse() ##want sorted in decreasing order of confidence
+    sorted_indices.reverse()
     TP_labels = [] ##to store labels that turn out to be TP_labels (used for Pascal VOC 2012 schema)
-    for prediction in predictions:
+    original_index_to_TP = {}
+    for i in range(0, len(sorted_predictions)):#prediction in sorted_predictions:
+        prediction = sorted_predictions[i]
+        original_index = sorted_indices[i]
         is_TP = False
         box_pred = prediction[0:4]
         for label in labels:
@@ -525,9 +530,12 @@ def getTPs(predictions, labels, iou_threshold, Pascal_VOC_scheme=True):
                 TP_labels.append(label)
                 break
         if is_TP:
-            TPs.append(1)
+            original_index_to_TP[original_index] = 1
         else:
-            TPs.append(0)
+            original_index_to_TP[original_index] = 0
+    for i in range(0, len(predictions)):
+        TPs.append(original_index_to_TP[i])
+    assert(len(predictions) == len(TPs))
     return TPs
 
 

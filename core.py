@@ -74,6 +74,35 @@ def preProcess(weak_label=False):
             final_mapp[img_path_1536].append((bbox_coord, (df.at[index, "cored"], df.at[index, "diffuse"], df.at[index, "CAA"])))
     return final_mapp
 
+def seedTestFolder():
+    """
+    data/amyloid_test/ will contain all of the raw un-annotated test images
+    """
+    shutil.rmtree("data/amyloid_test/")
+    os.mkdir("data/amyloid_test/")
+    images = os.listdir("data/custom/images/")
+    with open("data/custom/valid.txt","r") as f:
+        lines = f.readlines()
+        for line in lines:
+            line = line.replace("\n", "")
+            img_name = line[line.rfind("/") + 1: ]
+            shutil.copy(line, "data/amyloid_test/" + img_name)    
+
+def seedTrainFolder():
+    """
+    data/amyloid_train/ will contain all of the raw un-annotated train images
+    """
+    shutil.rmtree("data/amyloid_train/")
+    os.mkdir("data/amyloid_train/")
+    images = os.listdir("data/custom/images/")
+    with open("data/custom/train.txt","r") as f:
+        lines = f.readlines()
+        for line in lines:
+            line = line.replace("\n", "")
+            img_name = line[line.rfind("/") + 1: ]
+            shutil.copy(line, "data/amyloid_train/" + img_name)    
+
+
 def get256Img(img, bbox_coord):
     """
     Given a cv2 img that is 1536 x 1536 pixels, and a bbox_coordinate (top left x, top left y, width (x), height (y)) , will return a 256 x 256 cropped image that is centered on the bbox
@@ -188,17 +217,29 @@ def getClassPreds(img_256, model, data_transforms):
     predictions = tuple(predictions)
     return predictions
 
-def filterMapToGetCoredOrCAA(mapp):
+def filterMapToGetCoredOrCAA(mapp, just_CAA=False, just_Cored=False):
     """
     Will filter a mapp of  map of key: 1536 image name to value: list of (bbox coordinate, class label) tuples
     to only include 1536 images that have either a cored or CAA bbox prediction present 
+    if just_CAA, will get just CAAs
+    if just_Cored, will get just Cored 
     """
     new_mapp = {}
     for img in mapp:
         for bbox, class_preds in mapp[img]:
-            if class_preds[0] >= .5 or class_preds[2] >= 0.5:
-                new_mapp[img] = mapp[img]
-                continue
+            has_Cored = class_preds[0] >= .5
+            has_CAA = class_preds[2] >= 0.5
+            if just_CAA == just_Cored:
+                if has_Cored or has_CAA:
+                    new_mapp[img] = mapp[img]
+                    continue
+            else:
+                if just_CAA and has_CAA:
+                        new_mapp[img] = mapp[img]
+                        continue
+                if just_Cored and has_Cored:
+                        new_mapp[img] = mapp[img]
+                        continue
     return new_mapp
 
 def filterMapToGetCAATypes(mapp):
@@ -514,7 +555,7 @@ def getTPs(predictions, labels, iou_threshold, Pascal_VOC_scheme=True):
     sorted_indices.reverse()
     TP_labels = [] ##to store labels that turn out to be TP_labels (used for Pascal VOC 2012 schema)
     original_index_to_TP = {}
-    for i in range(0, len(sorted_predictions)):#prediction in sorted_predictions:
+    for i in range(0, len(sorted_predictions)):
         prediction = sorted_predictions[i]
         original_index = sorted_indices[i]
         is_TP = False
@@ -537,5 +578,67 @@ def getTPs(predictions, labels, iou_threshold, Pascal_VOC_scheme=True):
         TPs.append(original_index_to_TP[i])
     assert(len(predictions) == len(TPs))
     return TPs
+
+def comparePreMergeLabelsWithPostMerge(sample_size=100):
+    """
+    for visualization purposes only
+    compares the premerge labels with the postmerge labels
+    saves 1536 images with bboxes around all labeled plaques to output/ directory 
+    """
+    postmerge = pickle.load(open("pickles/map_1536_img_name_to_coordinates_and_preds_strong_labels_combined_bboxes.pkl", "rb")) #map from 1536 image name to list of (bbox coordinate, class label) tuples
+    premerge = pickle.load(open("pickles/map_1536_img_name_to_coordinates_and_preds_weak_label_False.pkl", "rb"))
+    assert(set(postmerge.keys()) == set(premerge.keys()))
+    postmerge, premerge = filterMapToGetCoredOrCAA(postmerge, just_CAA=True), filterMapToGetCoredOrCAA(premerge, just_CAA=True) ##narrow down to get cored and CAA positively predicted images
+    images = list(premerge.keys())
+    random.shuffle(images)
+    images = images[0:sample_size]
+    for mapp in [premerge, postmerge]:
+        if mapp == premerge:
+            save_dir = "output/premerge/"
+            l_type = "premerge" 
+        if mapp == postmerge:
+            save_dir = "output/postmerge/"
+            l_type = "postmerge"
+        if not os.path.isdir(save_dir):
+            os.mkdir(save_dir)
+        prefix = "data/custom/images/"
+        for img_name in images:
+            annotated_img = cv2.imread(img_name)
+            annotated_img = drawBBox(annotated_img, mapp[img_name], color_by_class=False)
+            save_name = l_type + "_" + img_name.replace(prefix, "").replace("/", "")
+            cv2.imwrite(save_dir + save_name, annotated_img)
+
+def drawBBox(img, bbox_class_preds, color_by_class=False):
+    """
+    given an IMG and a list of (bbox coordinate (i.e. x1,y1,width,height), class_pred) tuples, will draw a square for each bbox coordinate of cored or CAA (ignores diffuse)
+    if color_by_class:
+        will give blue to CAA, and red to cored
+    Order of priority: CAA -> Cored -> Diffuse -> No plaque
+    Will also annotate with class preds as text overlay
+    """
+    for bbox_coord, class_preds in bbox_class_preds:
+        if class_preds[2] < 0.5 and class_preds[0] < 0.5: #if no cored and no CAA, continue
+            continue
+        if color_by_class:
+            if class_preds[2] >= 0.5: #if CAA
+                color = (255, 0, 0)
+            if class_preds[0] >= 0.5: #if Cored
+                color = (0,0,255)
+        else:
+            color = (0,0,0)
+        x1 = bbox_coord[0]
+        y1 = bbox_coord[1]
+        x2 = bbox_coord[0] + bbox_coord[2]
+        y2 = bbox_coord[1] + bbox_coord[3]
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        class_preds = [round(x, 1) for x in class_preds]
+        if class_preds[2] >= 0.5 and class_preds[0] >= 0.5:
+            cv2.putText(img, "Cored and CAA", (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
+        elif class_preds[2] >= 0.5: 
+            cv2.putText(img, "CAA", (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
+        else:
+            cv2.putText(img, "Cored", (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
+    return img
 
 

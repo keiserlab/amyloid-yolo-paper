@@ -27,18 +27,78 @@ from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
 from core import *
 
-def runModelOnValidationImages():
+# def runModelOnValidationImages():
+#     """
+#     Runs YOLOv3 network over our prospective validation images, and saves a dictionary called prospective_validation_predictions.pkl
+#     with key: image name, value: list of (bbox coordinate, class) tuples
+#     """
+#     validation_predictions_dict = {}
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     model = Darknet("config/yolov3-custom.cfg", img_size=416).to(device)
+#     model.load_state_dict(torch.load("checkpoints/yolov3_ckpt_105.pth"))
+#     model.eval() 
+#     dataloader = DataLoader(
+#     ImageFolder("prospective_validation_images/", transform= \
+#         transforms.Compose([DEFAULT_TRANSFORMS, Resize(416)])),
+#     batch_size=8,
+#     shuffle=False,
+#     num_workers=12,
+#     ) 
+#     classes = load_classes("data/custom/classes.names")  # Extracts class labels from file
+#     Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+#     imgs = []  # Stores image paths
+#     img_detections = []  # Stores detections for each image index
+#     prev_time = time.time()
+#     for batch_i, (img_paths, input_imgs) in enumerate(dataloader):
+#         # Configure input
+#         input_imgs = Variable(input_imgs.type(Tensor))
+#         # Get detections
+#         with torch.no_grad():
+#             detections = model(input_imgs)
+#             detections = non_max_suppression(detections, 0.8, 0.4) ##use conf threshold of 0.8 for detection 
+#         # Save image and detections
+#         imgs.extend(img_paths)
+#         img_detections.extend(detections)
+#     # Iterate through images and save plot of detections
+#     for img_i, (path, detections) in enumerate(zip(imgs, img_detections)):
+#         save_path = path.replace("prospective_validation_images/", "")        
+#         # print("(%d) Image: '%s'" % (img_i, path))
+#         validation_predictions_dict[save_path] = []
+#         img = np.array(Image.open(path))
+#         if detections is None:
+#             continue
+#         detections = rescale_boxes(detections, 416, img.shape[:2])
+#         detections = mergeDetections(detections) 
+#         detections = filterDetectionsByCAAModel(path, detections, classes)
+#         if len(detections) == 0: ##it's possible that we removed all of the detections after filtering
+#             continue 
+#         else:
+#             for x1, y1, x2, y2, conf, cls_conf, cls_pred in detections:
+#                 validation_predictions_dict[save_path].append(({'x1': x1.item(), 'x2': x2.item(), 'y1': y1.item(), 'y2': y2.item(), 'conf': conf.item(), 'cls_conf': cls_conf.item(), 'cls_pred': cls_pred.item()}, classes[int(cls_pred)]))
+#     pickle.dump(validation_predictions_dict, open("pickles/prospective_validation_predictions.pkl", "wb"))
+
+def runModelOnValidationImages(val_type="prospective"):
     """
-    Runs YOLOv3 network over our prospective validation images, and saves a dictionary called prospective_validation_predictions.pkl
+    if val_type == "phase1" will run checkpoints_modelv1/yolov3_ckpt_157.pth model over data/amyloid_test
+    if val_type == "phase2" will run checkpoints/yolov3_ckpt_105.pth model over data/amyloid_test
+    if val_type == "prospective" will run checkpoints/yolov3_ckpt_105.pth model over prospective_validation_images/
+    Saves a dictionary called {val_type}_validation_predictions.pkl
     with key: image name, value: list of (bbox coordinate, class) tuples
     """
     validation_predictions_dict = {}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Darknet("config/yolov3-custom.cfg", img_size=416).to(device)
-    model.load_state_dict(torch.load("checkpoints/yolov3_ckpt_105.pth"))
+    if val_type == "phase2" or val_type == "prospective":
+        model.load_state_dict(torch.load("checkpoints/yolov3_ckpt_105.pth"))
+    if val_type == "phase1":
+        model.load_state_dict(torch.load("checkpoints_modelv1/yolov3_ckpt_157.pth"))
     model.eval() 
+    if val_type == "prospective":
+        image_folder = "prospective_validation_images/"
+    else:
+        image_folder = "data/amyloid_test/"
     dataloader = DataLoader(
-    ImageFolder("prospective_validation_images/", transform= \
+    ImageFolder(image_folder, transform= \
         transforms.Compose([DEFAULT_TRANSFORMS, Resize(416)])),
     batch_size=8,
     shuffle=False,
@@ -61,22 +121,57 @@ def runModelOnValidationImages():
         img_detections.extend(detections)
     # Iterate through images and save plot of detections
     for img_i, (path, detections) in enumerate(zip(imgs, img_detections)):
-        save_path = path.replace("prospective_validation_images/", "")        
+        if val_type == "prospective":
+            save_path = path.replace("prospective_validation_images/", "")   
+        else:
+            save_path = path.replace("data/amyloid_test/", "")   
         # print("(%d) Image: '%s'" % (img_i, path))
         validation_predictions_dict[save_path] = []
         img = np.array(Image.open(path))
         if detections is None:
             continue
         detections = rescale_boxes(detections, 416, img.shape[:2])
-        detections = mergeDetections(detections) 
-        detections = filterDetectionsByCAAModel(path, detections, classes)
+        if val_type != "phase1": ##for phase 2 and prospective, we merge final detections and also apply the consensus CAA filter
+            detections = mergeDetections(detections) 
+            detections = filterDetectionsByCAAModel(path, detections, classes)
         if len(detections) == 0: ##it's possible that we removed all of the detections after filtering
             continue 
         else:
             for x1, y1, x2, y2, conf, cls_conf, cls_pred in detections:
                 validation_predictions_dict[save_path].append(({'x1': x1.item(), 'x2': x2.item(), 'y1': y1.item(), 'y2': y2.item(), 'conf': conf.item(), 'cls_conf': cls_conf.item(), 'cls_pred': cls_pred.item()}, classes[int(cls_pred)]))
-    pickle.dump(validation_predictions_dict, open("pickles/prospective_validation_predictions.pkl", "wb"))
+    pickle.dump(validation_predictions_dict, open("pickles/{}_validation_predictions.pkl".format(val_type), "wb"))
 
+def convertPreProspectiveAnnotationsToPickle(phase="phase1"):
+    """
+    If phase == "phase1":
+    will take the labels found in original_data/labels/ and convert to pickle format with key: imagename, value: list of (coord dictionary x1, y1, x2, y2, class_label as string) tuples
+    If phase == "phase2":
+    will take the labels found in data/custom/labels/
+    Saves dictionary called pickles/{phase}_annotations.pkl
+    """  
+    if phase == "phase1":
+        labels_dir = "original_data/labels/"
+    if phase == "phase2":
+        labels_dir = "data/custom/labels/"
+    annotation_dict = {} ##key: imagename, value: (coord dictionary x1, y1, x2, y2, class_label as string)
+    for label_txt in os.listdir(labels_dir):
+        img_name = label_txt.replace(".txt", ".jpg")  
+        annotation_dict[img_name] = []          
+        with open(labels_dir + label_txt) as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line.replace("\n", "")
+                entries = line.split(" ")
+                idx, x_center, y_center, width, height = [float(x) for x in entries]
+                x_center, y_center, width, height = x_center*1536, y_center*1536, width*1536, height*1536 ##convert to pixel space
+                x1 = int(x_center - (width / float(2)))
+                x2 = int(x_center + (width / float(2)))
+                y1 = int(y_center - (height / float(2)))
+                y2 = int(y_center + (height / float(2)))
+                class_label = "Cored" if idx == 1 else "CAA"
+                annotation_dict[img_name].append(({"x1": x1, "x2":x2, "y1":y1, "y2":y2}, class_label))
+    pickle.dump(annotation_dict, open("pickles/{}_annotations.pkl".format(phase), "wb"))                
+                
 def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
     """
     Loads annotations and predictions dictionaries with format key: image name, value:  value: list of (bbox coordinate, class) tuples
@@ -588,24 +683,82 @@ def plotAllAnnotations():
                 # cv2.putText(img, class_label, (x1,y1), font, 1.5, color,2,cv2.LINE_AA)
         cv2.imwrite("output/AllAnnotations/".format(annotator) + img_name, img)
 
-def plotImageComparisons(overlay_labels=True, overlay_predictions=True):
+# def plotImageComparisons(overlay_labels=True, overlay_predictions=True):
+#     """
+#     Will plot the image model prediction boxes and also the annotation boxes from each annotator
+#     over the entire prospective validation set for each annotator
+#     saves images to output/{annotator}/ directory 
+#     """
+#     annotators = ["consensus"]# + ["merged"] #+ ["NP{}".format(i) for i in range(1, 5)]
+#     for annotator in annotators:
+#         if not os.path.isdir("output/{}".format(annotator)):
+#             os.mkdir("output/{}".format(annotator))
+#         if "consensus" in annotator:
+#             annotations = pickle.load(open("prospective_annotations/{}_annotations_iou_thresh_{}.pkl".format(annotator, 0.2), "rb"))
+#         else:
+#             annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
+#         predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
+#         font = cv2.FONT_HERSHEY_SIMPLEX
+#         for img_name in annotations:
+#             img = cv2.imread("prospective_validation_images/" + img_name)
+#             ##color detections
+#             if overlay_predictions:
+#                 for entry in predictions[img_name]:
+#                     dictionary, class_label  = entry[0], entry[1]
+#                     annotation_class = 1 if class_label == "Cored" else 0
+#                     x1 = int(dictionary['x1'])
+#                     y1 = int(dictionary['y1'])
+#                     x2 = int(dictionary['x2'])
+#                     y2 = int(dictionary['y2'])
+#                     color = (255,0,0) if class_label == "CAA" else (0,0,255)
+#                     cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
+
+#             ##labels will be black boxes
+#             if overlay_labels:
+#                 for entry in annotations[img_name]:
+#                     dictionary, class_label  = entry[0], entry[1]
+#                     x1 = int(dictionary['x1'])
+#                     y1 = int(dictionary['y1'])
+#                     x2 = int(dictionary['x2'])
+#                     y2 = int(dictionary['y2'])
+#                     color = (0,0,0) 
+#                     cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
+#                     cv2.putText(img, class_label, (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
+#             cv2.imwrite("output/{}/".format(annotator) + img_name, img)
+
+def plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_predictions=True):
     """
-    Will plot the image model prediction boxes and also the annotation boxes from each annotator
-    over the entire prospective validation set for each annotator
-    saves images to output/{annotator}/ directory 
+    if val_type == "prospective":
+        will plot the image model prediction boxes and also the annotation boxes from each annotator
+        over the validation set for each annotator
+    if val_type == "phase1":
+        will plot the prediction/annotation comparisons over the data found in data/amyloid_test/
+    saves images to output/{annotator}/ directory
     """
-    annotators = ["consensus"]# + ["merged"] #+ ["NP{}".format(i) for i in range(1, 5)]
+    if val_type == "prospective":
+        annotators = ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]
+    else:
+        annotators = [val_type]
     for annotator in annotators:
         if not os.path.isdir("output/{}".format(annotator)):
             os.mkdir("output/{}".format(annotator))
-        if "consensus" in annotator:
-            annotations = pickle.load(open("prospective_annotations/{}_annotations_iou_thresh_{}.pkl".format(annotator, 0.2), "rb"))
+        predictions = pickle.load(open("pickles/{}_validation_predictions.pkl".format(val_type), "rb"))
+        
+        ##load annotations dict and specify image folder
+        if val_type == "prospective":
+            if "consensus" in annotator:
+                annotations = pickle.load(open("prospective_annotations/{}_annotations_iou_thresh_{}.pkl".format(annotator, 0.2), "rb"))
+            else:
+                annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
+            img_folder = "prospective_validation_images/"
         else:
-            annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
-        predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
+            annotations = pickle.load(open("pickles/{}_annotations.pkl".format(val_type), "rb"))
+            annotations = {x:annotations[x] for x in annotations.keys() if x in predictions} ##we just want the validation images in {phase}_validation_predictions.pkl 
+            img_folder = "data/amyloid_test/"
+        
         font = cv2.FONT_HERSHEY_SIMPLEX
         for img_name in annotations:
-            img = cv2.imread("prospective_validation_images/" + img_name)
+            img = cv2.imread(img_folder + img_name)
             ##color detections
             if overlay_predictions:
                 for entry in predictions[img_name]:
@@ -629,7 +782,7 @@ def plotImageComparisons(overlay_labels=True, overlay_predictions=True):
                     color = (0,0,0) 
                     cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
                     cv2.putText(img, class_label, (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
-            cv2.imwrite("output/{}/".format(annotator) + img_name, img)
+            cv2.imwrite("output/{}/".format(annotator) + val_type + "_" + img_name, img)
 
 def addNPLabelToAnnotations(annotations, NP_id):
     """
@@ -645,7 +798,6 @@ def addNPLabelToAnnotations(annotations, NP_id):
             l.append((coordinate_dict, class_label, NP_id))
         annotations[image_name] = l
     return annotations
-
 
 def createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=0.5):
     """
@@ -767,21 +919,29 @@ def createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=0.5):
 
 shutil.rmtree("output/")
 os.mkdir("output/")
-runModelOnValidationImages()
-for iou_threshold in np.arange(.1, 1, .1):
-    createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=iou_threshold)
-for annotator in ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]:
-    for iou_threshold in np.arange(0.1, 1.0, 0.1):
-        compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=annotator)
-    plotPRC(annotator=annotator)
-    # getAnnotationOverlaps(annotator, iou_threshold=0.05)
-getPrecisionsOfAnnotatorsRelativeToEachOther()
-plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
-plotAPs(plotAvgOverlay=True)
+convertPreProspectiveAnnotationsToPickle(phase="phase1")
+convertPreProspectiveAnnotationsToPickle(phase="phase2")
+# runModelOnValidationImages(val_type="phase1")
+# runModelOnValidationImages(val_type="phase2")
+# runModelOnValidationImages(val_type="prospective")
+
+# for iou_threshold in np.arange(.1, 1, .1):
+#     createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=iou_threshold)
+# for annotator in ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]:
+#     for iou_threshold in np.arange(0.1, 1.0, 0.1):
+#         compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=annotator)
+#     plotPRC(annotator=annotator)
+#     # getAnnotationOverlaps(annotator, iou_threshold=0.05)
+# getPrecisionsOfAnnotatorsRelativeToEachOther()
+# plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
+# plotAPs(plotAvgOverlay=True)
 
 
 # findLowPerformanceImages("Cored", "consensus", iou_threshold=0.5)
-# plotImageComparisons(overlay_labels=True, overlay_predictions=True)
+# plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_predictions=True)
+plotImageComparisons(val_type="phase1", overlay_labels=True, overlay_predictions=True)
+plotImageComparisons(val_type="phase2", overlay_labels=True, overlay_predictions=True)
+
 # plotAllAnnotations()
 # getInterraterAgreement(iou_threshold=0.5)
 # plotInterraterAgreement()

@@ -321,7 +321,14 @@ def speedCheck(use_gpu=True, include_merge_and_filter=True):
     pickle.dump(time_dict, open("pickles/run_times_use_gpu_{}_{}.pkl".format(use_gpu, hostname), "wb"))
 
 
-calculatePlaqueCountsPerWSI(task="CERAD all", save_images=False)
+
+
+
+
+shutil.rmtree("output/")
+os.mkdir("output/")
+comparePreMergeLabelsWithPostMerge(sample_size=100)
+# calculatePlaqueCountsPerWSI(task="CERAD all", save_images=False)
 # calculatePlaqueCountsPerWSI(task="lise dataset")
 # plotCERADVsCounts(plaque_type = "Cored", CERAD_type="CERAD")
 # plotCERADVsCounts(plaque_type = "Cored", CERAD_type="Cored_MTG")

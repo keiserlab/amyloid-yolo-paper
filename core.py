@@ -242,18 +242,6 @@ def filterMapToGetCoredOrCAA(mapp, just_CAA=False, just_Cored=False):
                         continue
     return new_mapp
 
-def filterMapToGetCAATypes(mapp):
-    """
-    Will filter a mapp of key: 1536 image name to value: list of (bbox coordinate, CAA class labels: leptomeningeal,parenchymal,capillary,flag,notsure,notrecommended,vonsattel0,vonsattel1,vonsattel2,vonsattel3,vonsattel4) tuples
-    to only include 1536 images that have either a CAA bbox prediction present 
-    """
-    new_mapp = {}
-    for img in mapp:
-        for bbox, class_preds in mapp[img]:
-            if class_preds[0] >= .5 or class_preds[1] >= 0.5 or class_preds[2] >= 0.5:
-                new_mapp[img] = mapp[img]
-                continue
-    return new_mapp
 
 def seedTestFolder():
     """
@@ -588,7 +576,7 @@ def comparePreMergeLabelsWithPostMerge(sample_size=100):
     postmerge = pickle.load(open("pickles/map_1536_img_name_to_coordinates_and_preds_strong_labels_combined_bboxes.pkl", "rb")) #map from 1536 image name to list of (bbox coordinate, class label) tuples
     premerge = pickle.load(open("pickles/map_1536_img_name_to_coordinates_and_preds_weak_label_False.pkl", "rb"))
     assert(set(postmerge.keys()) == set(premerge.keys()))
-    postmerge, premerge = filterMapToGetCoredOrCAA(postmerge, just_CAA=True), filterMapToGetCoredOrCAA(premerge, just_CAA=True) ##narrow down to get cored and CAA positively predicted images
+    postmerge, premerge = filterMapToGetCoredOrCAA(postmerge, just_CAA=True), filterMapToGetCoredOrCAA(premerge, just_CAA=True) ##narrow down to get CAA labeled images
     images = list(premerge.keys())
     random.shuffle(images)
     images = images[0:sample_size]

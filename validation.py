@@ -33,6 +33,7 @@ import matplotlib.patches as patches
 from matplotlib.ticker import NullLocator
 import pickle
 import socket
+from scipy.stats import ttest_ind
 from core import *
 
 def calculatePlaqueCountsPerWSI(task, save_images=False):
@@ -193,7 +194,7 @@ def plotCERADVsCounts(plaque_type="Cored", CERAD_type="CERAD"):
     if CERAD_type == "CERAD":
         categories = ["none", "sparse", "moderate", "frequent"]
         column_key = "CERAD"
-        ax.set_xlabel("CERAD", fontname="Times New Roman", fontsize=12)
+        ax.set_xlabel("CERAD-like Score", fontname="Times New Roman", fontsize=12)
     if "MTG" in CERAD_type: ##if CERAD-like
         categories = [i for i in range(0, 4)]
         column_key = CERAD_type
@@ -209,13 +210,67 @@ def plotCERADVsCounts(plaque_type="Cored", CERAD_type="CERAD"):
             continue
         cerad_scores_map[row[column_key]].append(WSI_plaque_counts[WSI_name][plaque_type])
     ax.boxplot([cerad_scores_map[cat] for cat in categories])
+    
+    print(cerad_scores_map)
+    ##overlay points on top of boxplot
+    for i in range(0, len(categories)):
+        ax.scatter([i + 1 + random.uniform(-.02, .02) for x in cerad_scores_map[categories[i]]], cerad_scores_map[categories[i]], s=6, color="blue")
+    
     ax.set_ylabel("{} Count According to Model".format(plaque_type), fontname="Times New Roman", fontsize=12)
     categories = [str(cat) + "\nn=" + str(len(cerad_scores_map[cat])) + " WSIs" for cat in categories]
     ax.set_xticklabels(categories,fontsize=10, fontname="Times New Roman")
-    plt.title("CERAD Correlation with Predicted {} Counts".format(plaque_type))
+    plt.title("Model Correlation with CERAD-like Score".format(plaque_type))
     plt.gcf().subplots_adjust(bottom=0.14, top=.89)
     plt.savefig("figures/CERAD_correlation_{}_{}.png".format(plaque_type, CERAD_type), dpi=300)
  
+def plotCERADStatisticalSignificance(plaque_type="Cored"):
+    """
+    """
+    WSI_plaque_counts = pickle.load(open("pickles/CERAD_WSI_plaque_counts_dictionary.pkl", "rb"))
+    cerad_scores = pd.read_csv("csvs/CERAD_scores.csv")
+    categories = ["none", "sparse", "moderate", "frequent"]
+    cerad_scores_map = {cat: [] for cat in categories} 
+    for index, row in cerad_scores.iterrows():
+        WSI_name = row["WSI_ID"]
+        if WSI_name not in WSI_plaque_counts:
+            print("{} not found in WSI plaque counts dictionary".format(WSI_name))
+            continue
+        cerad_scores_map[row["CERAD"]].append(WSI_plaque_counts[WSI_name][plaque_type])
+    print(cerad_scores_map)
+    t_test_map = {(cat1, cat2): -1 for cat1 in categories for cat2 in categories} #key: (CERAD category1, CERAD category2), value: (t-statistic, p-value) 
+    grid = []
+    for key in cerad_scores_map:
+        l = []
+        for key2 in cerad_scores_map:
+            t, p = ttest_ind(cerad_scores_map[key], cerad_scores_map[key2])
+            t_test_map[key, key2] = float(t), float(p)
+            l.append(float(p))
+        grid.append(l)
+    print(t_test_map)
+    grid = np.asarray(grid)
+    print(grid.shape)
+    fig, ax = plt.subplots()
+    im = ax.imshow(grid,vmin=0, vmax=0.30, cmap="coolwarm")
+    ax.set_xticks(np.arange(len(categories)))
+    ax.set_yticks(np.arange(len(categories)))
+    plt_labels = categories
+    ax.set_xticklabels(plt_labels,fontsize=11)
+    ax.set_yticklabels(plt_labels,fontsize=11)
+    for i in range(len(categories)):
+        for j in range(len(categories)):
+            if grid[i][j] < .001:
+                text = ax.text(j, i, "{:.2e}".format(grid[i][j]), ha="center", va="center", color="white", fontsize=11)
+            else:
+                text = ax.text(j, i, str(round(grid[i][j], 3)), ha="center", va="center", color="white", fontsize=11)
+
+    cbar = ax.figure.colorbar(im, ax=ax)
+    cbar.ax.tick_params(labelsize=11)
+    fig.tight_layout()
+    ax.set_title("t-test p-values", fontsize=12)
+    plt.savefig("figures/CERAD-t-test-p-values.png", dpi=300)
+
+
+
 def getStain(string):
     """
     Given string, will return the stain
@@ -327,12 +382,13 @@ def speedCheck(use_gpu=True, include_merge_and_filter=True):
 
 shutil.rmtree("output/")
 os.mkdir("output/")
-comparePreMergeLabelsWithPostMerge(sample_size=100)
+# comparePreMergeLabelsWithPostMerge(sample_size=100)
 # calculatePlaqueCountsPerWSI(task="CERAD all", save_images=False)
 # calculatePlaqueCountsPerWSI(task="lise dataset")
-# plotCERADVsCounts(plaque_type = "Cored", CERAD_type="CERAD")
+plotCERADVsCounts(plaque_type = "Cored", CERAD_type="CERAD")
 # plotCERADVsCounts(plaque_type = "Cored", CERAD_type="Cored_MTG")
 # plotCERADVsCounts(plaque_type = "CAA", CERAD_type="CAA_MTG")
+plotCERADStatisticalSignificance()
 # speedCheck(use_gpu=True)
 # speedCheck(use_gpu=False)
 

@@ -27,56 +27,6 @@ from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
 from core import *
 
-# def runModelOnValidationImages():
-#     """
-#     Runs YOLOv3 network over our prospective validation images, and saves a dictionary called prospective_validation_predictions.pkl
-#     with key: image name, value: list of (bbox coordinate, class) tuples
-#     """
-#     validation_predictions_dict = {}
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     model = Darknet("config/yolov3-custom.cfg", img_size=416).to(device)
-#     model.load_state_dict(torch.load("checkpoints/yolov3_ckpt_105.pth"))
-#     model.eval() 
-#     dataloader = DataLoader(
-#     ImageFolder("prospective_validation_images/", transform= \
-#         transforms.Compose([DEFAULT_TRANSFORMS, Resize(416)])),
-#     batch_size=8,
-#     shuffle=False,
-#     num_workers=12,
-#     ) 
-#     classes = load_classes("data/custom/classes.names")  # Extracts class labels from file
-#     Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-#     imgs = []  # Stores image paths
-#     img_detections = []  # Stores detections for each image index
-#     prev_time = time.time()
-#     for batch_i, (img_paths, input_imgs) in enumerate(dataloader):
-#         # Configure input
-#         input_imgs = Variable(input_imgs.type(Tensor))
-#         # Get detections
-#         with torch.no_grad():
-#             detections = model(input_imgs)
-#             detections = non_max_suppression(detections, 0.8, 0.4) ##use conf threshold of 0.8 for detection 
-#         # Save image and detections
-#         imgs.extend(img_paths)
-#         img_detections.extend(detections)
-#     # Iterate through images and save plot of detections
-#     for img_i, (path, detections) in enumerate(zip(imgs, img_detections)):
-#         save_path = path.replace("prospective_validation_images/", "")        
-#         # print("(%d) Image: '%s'" % (img_i, path))
-#         validation_predictions_dict[save_path] = []
-#         img = np.array(Image.open(path))
-#         if detections is None:
-#             continue
-#         detections = rescale_boxes(detections, 416, img.shape[:2])
-#         detections = mergeDetections(detections) 
-#         detections = filterDetectionsByCAAModel(path, detections, classes)
-#         if len(detections) == 0: ##it's possible that we removed all of the detections after filtering
-#             continue 
-#         else:
-#             for x1, y1, x2, y2, conf, cls_conf, cls_pred in detections:
-#                 validation_predictions_dict[save_path].append(({'x1': x1.item(), 'x2': x2.item(), 'y1': y1.item(), 'y2': y2.item(), 'conf': conf.item(), 'cls_conf': cls_conf.item(), 'cls_pred': cls_pred.item()}, classes[int(cls_pred)]))
-#     pickle.dump(validation_predictions_dict, open("pickles/prospective_validation_predictions.pkl", "wb"))
-
 def runModelOnValidationImages(val_type="prospective"):
     """
     if val_type == "phase1" will run checkpoints_modelv1/yolov3_ckpt_157.pth model over data/amyloid_test
@@ -172,17 +122,20 @@ def convertPreProspectiveAnnotationsToPickle(phase="phase1"):
                 annotation_dict[img_name].append(({"x1": x1, "x2":x2, "y1":y1, "y2":y2}, class_label))
     pickle.dump(annotation_dict, open("pickles/{}_annotations.pkl".format(phase), "wb"))                
                 
-def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
+def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1", val_type="prospective"):
     """
     Loads annotations and predictions dictionaries with format key: image name, value:  value: list of (bbox coordinate, class) tuples
-    Saves a table df PRC_tables/PRC_table_{}_iou_{}_{}.csv.format(annotator, iou_threshold, amyloid_class)
-    Also saves a dictionary called img_precision_maps/precision_img_map_{}_{}.format(annotator, iou_threshold) mapping key: imagename, to value: precision  
+    Saves a table df PRC_tables/{}_PRC_table_{}_iou_{}_{}.csv.format(val_type, annotator, iou_threshold, amyloid_class)
+    Also saves a dictionary called img_precision_maps/{}_precision_img_map_{}_{}.format(val_type, annotator, iou_threshold) mapping key: imagename, to value: precision  
     """
-    if annotator == "consensus":
-        annotations = pickle.load(open("prospective_annotations/consensus_annotations_iou_thresh_{}.pkl".format(round(iou_threshold, 2)), "rb"))
-    else:
-        annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
-    predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
+    if val_type == "prospective":
+        if annotator == "consensus":
+            annotations = pickle.load(open("prospective_annotations/consensus_annotations_iou_thresh_{}.pkl".format(round(iou_threshold, 2)), "rb"))
+        else:
+            annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
+    if val_type == "phase1" or val_type == "phase2":
+        annotations = pickle.load(open("pickles/{}_annotations.pkl".format(val_type), "rb"))
+    predictions = pickle.load(open("pickles/{}_validation_predictions.pkl".format(val_type), "rb"))
     ##iterate over each image and compute success metrics
     table_cored = [] ##will be a table for each Cored model detection of confidence, TP, FP, cumTP, cumFP, Precision, Recall
     table_CAA = []
@@ -190,7 +143,7 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
     num_Cored_labels = 0
     precision_img_map_cored = {}
     precision_img_map_CAA = {}
-    for img_name in annotations.keys(): 
+    for img_name in predictions.keys(): ##iterate over prediction keys because this is a subset of annotation keys for phase1 and phase2
         outputs = [] ##list of model detections for this particular image
         labels = [] ## list of annotations for this particular image
         for entry in predictions[img_name]: ##can be multiple boxes
@@ -248,8 +201,8 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
         else:
             precision_img_map_CAA[img_name] = -1
    
-    pickle.dump(precision_img_map_cored, open("pickles/img_precision_maps/precision_img_map_Cored_{}_{}.pkl".format(annotator, round(iou_threshold,2)), "wb"))
-    pickle.dump(precision_img_map_CAA, open("pickles/img_precision_maps/precision_img_map_CAA_{}_{}.pkl".format(annotator, round(iou_threshold,2)), "wb"))
+    pickle.dump(precision_img_map_cored, open("pickles/img_precision_maps/{}_precision_img_map_Cored_{}_{}.pkl".format(val_type, annotator, round(iou_threshold,2)), "wb"))
+    pickle.dump(precision_img_map_CAA, open("pickles/img_precision_maps/{}_precision_img_map_CAA_{}_{}.pkl".format(val_type, annotator, round(iou_threshold,2)), "wb"))
 
     ##make the table into a dataframe, and compute the relevant columns
     for amyloid_class in ["Cored", "CAA"]:
@@ -292,11 +245,45 @@ def compareAnnotationsToPredictions(iou_threshold=0.5, annotator="NP1"):
         table['Precision'] = precision
         table['Recall'] = recall
 
-        table.to_csv("PRC_tables/PRC_table_{}_iou_{}_{}.csv".format(annotator, round(iou_threshold, 1), amyloid_class))
+        table.to_csv("PRC_tables/{}_PRC_table_{}_iou_{}_{}.csv".format(val_type, annotator, round(iou_threshold, 1), amyloid_class))
 
-def plotAPs(plotAvgOverlay=True):
+def plotAPsForPhases(plot_phases_separately=True):
     """
-    Will plot average precisions at different IOU thresholds for each (model, annotator) pair
+    Plot APs vs IOU for model v1 and model v2
+    """
+    iou_thresholds = list(np.arange(0.1, 1.0, 0.1))
+    amyloid_classes = ["Cored", "CAA"]
+    phases = ["phase1", "phase2"]
+    AP_map = {phase: {amyloid_class: {thresh: -1 for thresh in iou_thresholds} for amyloid_class in amyloid_classes} for phase in phases}
+    for phase in phases:
+        for amyloid_class in amyloid_classes:
+            for iou_threshold in iou_thresholds:
+                df = pd.read_csv("PRC_tables/{}_PRC_table_{}_iou_{}_{}.csv".format(phase, phase, round(iou_threshold, 2), amyloid_class))
+                precision, recall, thresholds = precision_recall_curve(list(df['TP']),list(df['Conf']))
+                AP = average_precision_score(list(df['TP']),list(df['Conf']))
+                AP_map[phase][amyloid_class][iou_threshold] = AP
+    for phase in phases:
+        fig, ax = plt.subplots()
+        for amyloid_class in amyloid_classes:
+            x = iou_thresholds
+            y = [AP_map[phase][amyloid_class][thresh] for thresh in x]
+            ax.plot(x, y, linestyle='-', marker='o', label=amyloid_class)    
+        plt.ylim([0.0, 1.0])
+        modelv = "One" if phase == "phase1" else "Two"
+        plt.title("Model Version {} Average Precisions".format(modelv))
+        ax.set_xlabel("IOU Threshold", fontname="Times New Roman", fontsize=12)
+        ax.set_ylabel("Average Precision", fontname="Times New Roman", fontsize=12)
+        plt.xticks(np.arange(0.1, 1.0, .1))
+        #Shrink current axis and place legend outside plot, top right corner 
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0, box.width, box.height * 0.80])
+        ax.legend(loc='upper right', fontsize=10, bbox_to_anchor=(1, 1.40))
+        plt.gcf().subplots_adjust(bottom=0.13, top=.76) #default: left = 0.125, right = 0.9, bottom = 0.1, top = 0.9
+        plt.savefig("figures/PRC_cumulative_plot_{}.png".format(phase), dpi=300)
+
+def plotAPsForProspective(plotAvgOverlay=True):
+    """
+    Will plot average precisions for prospective validation at different IOU thresholds for each (model, annotator) pair
     if plotAvgOverlay, will plot the average and std fill of comparing each annotator relative to each other 
     """
     annotators = ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]
@@ -306,7 +293,7 @@ def plotAPs(plotAvgOverlay=True):
     for annotator in annotators:
         for amyloid_class in amyloid_classes:
             for iou_threshold in iou_thresholds:
-                df = pd.read_csv("PRC_tables/PRC_table_{}_iou_{}_{}.csv".format(annotator, round(iou_threshold, 2), amyloid_class))
+                df = pd.read_csv("PRC_tables/prospective_PRC_table_{}_iou_{}_{}.csv".format(annotator, round(iou_threshold, 2), amyloid_class))
                 precision, recall, thresholds = precision_recall_curve(list(df['TP']),list(df['Conf']))
                 AP = average_precision_score(list(df['TP']),list(df['Conf']))
                 AP_map[annotator][amyloid_class][iou_threshold] = AP
@@ -355,7 +342,10 @@ def getAnnotationOverlaps(annotator="NP1", iou_threshold=0.5):
     i.e. how many of annotators bounding boxes overlap with another bbox from same annotator
     Returns number of overlaps
     """
-    annotation = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
+    if annotator == "consensus":
+        annotation = pickle.load(open("prospective_annotations/consensus_annotations_iou_thresh_0.5.pkl", "rb")) ##use the 0.5 iou consensus annotation
+    else:
+        annotation = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
     overlaps_with_same_class_label = 0
     for img_name in annotation.keys():
         entries = annotation[img_name] ##list of dictionary, class_label tuples
@@ -484,35 +474,50 @@ def plotInterraterAgreement(iou_threshold=0.5):
         cbar = ax.figure.colorbar(im, ax=ax)
         cbar.ax.tick_params(labelsize=11)
         fig.tight_layout()
-        ax.set_title("{} Interrater Agreement Accuracy\nwith IOU = {}".format(amyloid_class, round(iou_threshold,2)), fontsize=12)
+        ax.set_title("{} Interrater Agreement Accuracy, IOU = {}".format(amyloid_class, round(iou_threshold,2)), fontsize=12)
         plt.savefig("figures/interrater_agreement_accuracy_{}_{}.png".format(amyloid_class, round(iou_threshold,2)), dpi=300)
 
-def plotPRC(annotator="NP1"):
+def plotPRC(annotator="NP1",val_type="prospective", separate_legend=True):
     """
     Given a PRC table and an annotator to determine which annotation set to use, will plot a PRC curve with different IOU thresholds
+    if separate_legend, will plot the legend separately
     """
     for amyloid_class in ["Cored", "CAA"]:
-        fig, ax = plt.subplots()
-
-        for iou_threshold in [.3, .5, .7, .8, .9]:
-            df = pd.read_csv("PRC_tables/PRC_table_{}_iou_{}_{}.csv".format(annotator, iou_threshold, amyloid_class))
+        if separate_legend:
+            fig = plt.figure("main figure")
+            legendFig = plt.figure("legend plot")
+            ax = fig.add_subplot(111)
+        else:
+            fig, ax = plt.subplots()
+        lines = []
+        labels = []
+        for iou_threshold in [.2, .4, .6, .8]:
+            df = pd.read_csv("PRC_tables/{}_PRC_table_{}_iou_{}_{}.csv".format(val_type, annotator, round(iou_threshold, 2), amyloid_class))
             # precision = df['Precision']
             # recall = df['Recall']
             precision, recall, thresholds = precision_recall_curve(list(df['TP']),list(df['Conf']))
             AP = average_precision_score(list(df['TP']),list(df['Conf'])) ##TP is the list of labels 1 = (+), 0 = (-)
-            ax.plot(recall, precision, label="AP@{} = {}".format(iou_threshold, str(round(AP, 3))))
+            line, = ax.plot(recall, precision, label="AP@{} = {}".format(iou_threshold, str(round(AP, 2))))
+            lines.append(line)
+            labels.append("AP@{} = {}".format(iou_threshold, str(round(AP, 3))))
         ax.set_xlabel("Recall", fontname="Times New Roman", fontsize=12)
         ax.set_ylabel("Precision", fontname="Times New Roman", fontsize=12)
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.0])
         plt.title("{} PRC, {}".format(amyloid_class, annotator))
-
-        #Shrink current axis and place legend outside plot, top right corner 
-        box = ax.get_position()
-        ax.set_position([box.x0, box.y0, box.width, box.height * 0.85])
-        ax.legend(loc='upper right', fontsize=10, bbox_to_anchor=(1, 1.35))
-        plt.gcf().subplots_adjust(bottom=0.13, top=.76) #default: left = 0.125, right = 0.9, bottom = 0.1, top = 0.9
-        plt.savefig("figures/PRC_plot_{}_{}.png".format(annotator, amyloid_class))
+        if separate_legend:
+            fig.savefig("figures/PRC_plot_{}_{}.png".format(annotator, amyloid_class))
+            legendFig.legend(lines, labels, fontsize=10, loc="center")
+            legendFig.savefig("figures/PRC_plot_{}_{}_legend.png".format(annotator, amyloid_class))
+            fig.clf()
+            legendFig.clf()
+        else:
+            #Shrink current axis and place legend outside plot, top right corner 
+            box = ax.get_position()
+            ax.set_position([box.x0, box.y0, box.width, box.height * 0.85])
+            ax.legend(loc='upper right', fontsize=10, bbox_to_anchor=(1, 1.35))
+            plt.gcf().subplots_adjust(bottom=0.13, top=.76) #default: left = 0.125, right = 0.9, bottom = 0.1, top = 0.9
+            plt.savefig("figures/PRC_plot_{}_{}.png".format(annotator, amyloid_class))
 
 def getPrecisionsOfAnnotatorsRelativeToEachOther():
     """
@@ -638,21 +643,22 @@ def plotTimeChart(iou_threshold=0.5):
         for annotator in annotators:
             x = time_map[annotator]
             y = AP_map[annotator][amyloid_class][iou_threshold]
-            marker = "o" if amyloid_class == "Cored" else "D"
+            print(amyloid_class, x, y)
+            marker = "$*$" if amyloid_class == "Cored" else "$@$"
             if amyloid_class == "Cored": 
-                ax.scatter(x, y, marker=marker, color=color_dict[annotator], label=annotator)
+                ax.scatter(x, y, s=120, marker=marker, color=color_dict[annotator], label=annotator)
             else: ##plot without label flag 
-                ax.scatter(x, y, marker=marker, color=color_dict[annotator])
+                ax.scatter(x, y, s=120, marker=marker, color=color_dict[annotator])
         plt.title("Time Spent Annotating\nVersus AP")
         plt.ylim([0.0, 1.0])
         ax.set_xlabel("Annotation Hours", fontname="Times New Roman", fontsize=12)
-        ax.set_ylabel("Average Precision @{}".format(iou_threshold), fontname="Times New Roman", fontsize=12)
+        ax.set_ylabel("Average Precision @IOU={}".format(iou_threshold), fontname="Times New Roman", fontsize=12)
         #Shrink current axis and place legend outside plot, top right corner 
         box = ax.get_position()
         ax.set_position([box.x0, box.y0, box.width, box.height * 0.85])
         ax.legend(loc='upper right', fontsize=10, bbox_to_anchor=(1, 1.35))
         plt.gcf().subplots_adjust(bottom=0.13, top=.76) #default: left = 0.125, right = 0.9, bottom = 0.1, top = 0.9
-        plt.savefig("figures/time_vs_AP.png".format(amyloid_class))
+        plt.savefig("figures/time_vs_AP.png".format(amyloid_class), dpi=300)
  
 def plotAllAnnotations():
     """
@@ -663,6 +669,7 @@ def plotAllAnnotations():
     annotators = ["NP{}".format(i) for i in range(1, 5)]
                     #BGR:  orange #ff8800      blue #03ebfc          pink #fc039d            green #00ff26 (38, 255, 0) 
     color_dict = {"NP1": (0, 136, 255), "NP2": (252, 235, 3), "NP3":(157, 3, 252), "NP4": (40, 186, 35)}
+    class_symbols = {"Cored": "*", "CAA":"@"}
     font = cv2.FONT_HERSHEY_SIMPLEX
     annotations_dict = {annotator: {} for annotator in annotators}
     for annotator in annotators:
@@ -680,63 +687,21 @@ def plotAllAnnotations():
                 y2 = int(dictionary['y2'])
                 color = color_dict[annotator] 
                 cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-                # cv2.putText(img, class_label, (x1,y1), font, 1.5, color,2,cv2.LINE_AA)
+                cv2.putText(img, class_symbols[class_label], (x1,y1), font, 1.5, color,2,cv2.LINE_AA)
         cv2.imwrite("output/AllAnnotations/".format(annotator) + img_name, img)
-
-# def plotImageComparisons(overlay_labels=True, overlay_predictions=True):
-#     """
-#     Will plot the image model prediction boxes and also the annotation boxes from each annotator
-#     over the entire prospective validation set for each annotator
-#     saves images to output/{annotator}/ directory 
-#     """
-#     annotators = ["consensus"]# + ["merged"] #+ ["NP{}".format(i) for i in range(1, 5)]
-#     for annotator in annotators:
-#         if not os.path.isdir("output/{}".format(annotator)):
-#             os.mkdir("output/{}".format(annotator))
-#         if "consensus" in annotator:
-#             annotations = pickle.load(open("prospective_annotations/{}_annotations_iou_thresh_{}.pkl".format(annotator, 0.2), "rb"))
-#         else:
-#             annotations = pickle.load(open("prospective_annotations/{}_annotations.pkl".format(annotator), "rb"))
-#         predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
-#         font = cv2.FONT_HERSHEY_SIMPLEX
-#         for img_name in annotations:
-#             img = cv2.imread("prospective_validation_images/" + img_name)
-#             ##color detections
-#             if overlay_predictions:
-#                 for entry in predictions[img_name]:
-#                     dictionary, class_label  = entry[0], entry[1]
-#                     annotation_class = 1 if class_label == "Cored" else 0
-#                     x1 = int(dictionary['x1'])
-#                     y1 = int(dictionary['y1'])
-#                     x2 = int(dictionary['x2'])
-#                     y2 = int(dictionary['y2'])
-#                     color = (255,0,0) if class_label == "CAA" else (0,0,255)
-#                     cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-
-#             ##labels will be black boxes
-#             if overlay_labels:
-#                 for entry in annotations[img_name]:
-#                     dictionary, class_label  = entry[0], entry[1]
-#                     x1 = int(dictionary['x1'])
-#                     y1 = int(dictionary['y1'])
-#                     x2 = int(dictionary['x2'])
-#                     y2 = int(dictionary['y2'])
-#                     color = (0,0,0) 
-#                     cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-#                     cv2.putText(img, class_label, (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
-#             cv2.imwrite("output/{}/".format(annotator) + img_name, img)
 
 def plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_predictions=True):
     """
     if val_type == "prospective":
         will plot the image model prediction boxes and also the annotation boxes from each annotator
         over the validation set for each annotator
-    if val_type == "phase1":
+    if val_type == "phase1" or "phase2":
         will plot the prediction/annotation comparisons over the data found in data/amyloid_test/
     saves images to output/{annotator}/ directory
     """
+    class_symbols = {"Cored": "*", "CAA":"@"}
     if val_type == "prospective":
-        annotators = ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]
+        annotators = ["consensus"]# + ["NP{}".format(i) for i in range(1, 5)]
     else:
         annotators = [val_type]
     for annotator in annotators:
@@ -781,7 +746,8 @@ def plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_pr
                     y2 = int(dictionary['y2'])
                     color = (0,0,0) 
                     cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-                    cv2.putText(img, class_label, (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
+                    # cv2.putText(img, class_label, (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
+                    cv2.putText(img, class_symbols[class_label], (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)            
             cv2.imwrite("output/{}/".format(annotator) + val_type + "_" + img_name, img)
 
 def addNPLabelToAnnotations(annotations, NP_id):
@@ -919,33 +885,37 @@ def createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=0.5):
 
 shutil.rmtree("output/")
 os.mkdir("output/")
-convertPreProspectiveAnnotationsToPickle(phase="phase1")
-convertPreProspectiveAnnotationsToPickle(phase="phase2")
-# runModelOnValidationImages(val_type="phase1")
-# runModelOnValidationImages(val_type="phase2")
-# runModelOnValidationImages(val_type="prospective")
 
-# for iou_threshold in np.arange(.1, 1, .1):
-#     createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=iou_threshold)
-# for annotator in ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]:
-#     for iou_threshold in np.arange(0.1, 1.0, 0.1):
-#         compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=annotator)
-#     plotPRC(annotator=annotator)
-#     # getAnnotationOverlaps(annotator, iou_threshold=0.05)
-# getPrecisionsOfAnnotatorsRelativeToEachOther()
-# plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
-# plotAPs(plotAvgOverlay=True)
+#analysis of model v1 and v2 predictions
+for phase in ["phase1", "phase2"]:
+    convertPreProspectiveAnnotationsToPickle(phase=phase)
+    runModelOnValidationImages(val_type=phase)
+    for iou_threshold in np.arange(0.1, 1.0, 0.1):
+        compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=phase, val_type=phase)
+    plotPRC(annotator=phase, val_type=phase, separate_legend=False)
+    plotImageComparisons(val_type=phase, overlay_labels=True, overlay_predictions=True)
+plotAPsForPhases()
 
+#prospective validation of model v2 predictions
+runModelOnValidationImages(val_type="prospective")
+for iou_threshold in np.arange(.1, 1, .1):
+    createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=iou_threshold)
+for annotator in ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]:
+    for iou_threshold in np.arange(0.1, 1.0, 0.1):
+        compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=annotator, val_type="prospective")
+    plotPRC(annotator=annotator, val_type="prospective")
+    getAnnotationOverlaps(annotator, iou_threshold=0.05)
+getPrecisionsOfAnnotatorsRelativeToEachOther()
+plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
+plotAPsForProspective(plotAvgOverlay=True)
+plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_predictions=True)
 
-# findLowPerformanceImages("Cored", "consensus", iou_threshold=0.5)
-# plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_predictions=True)
-plotImageComparisons(val_type="phase1", overlay_labels=True, overlay_predictions=True)
-plotImageComparisons(val_type="phase2", overlay_labels=True, overlay_predictions=True)
-
-# plotAllAnnotations()
-# getInterraterAgreement(iou_threshold=0.5)
-# plotInterraterAgreement()
-# plotTimeChart()
+##other analyses
+findLowPerformanceImages("Cored", "consensus", iou_threshold=0.5)
+plotAllAnnotations()
+getInterraterAgreement(iou_threshold=0.5)
+plotInterraterAgreement()
+plotTimeChart()
 
 
 

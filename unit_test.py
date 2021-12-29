@@ -223,7 +223,7 @@ class ProspectiveValidationTests(unittest.TestCase):
 
     def testPrecisionMapEmpties(self):
         """
-        Make sure any images with value -1 in "pickles/img_precision_maps/precision_img_map_{}_{}_{}.pkl".format(amyloid_class, annotator, iou_threshold)
+        Make sure any images with value -1 in "pickles/img_precision_maps/prospective_precision_img_map_{}_{}_{}.pkl".format(amyloid_class, annotator, iou_threshold)
         has no img prediction from the model 
         """
         annotators = ["NP{}".format(i) for i in range(1, 5)]
@@ -231,7 +231,7 @@ class ProspectiveValidationTests(unittest.TestCase):
         predictions = pickle.load(open("pickles/prospective_validation_predictions.pkl", "rb"))
         for annotator in annotators:
             for amyloid_class in ["Cored", "CAA"]:
-                mapp = pickle.load(open("pickles/img_precision_maps/precision_img_map_{}_{}_{}.pkl".format(amyloid_class, annotator, iou_threshold), "rb"))
+                mapp = pickle.load(open("pickles/img_precision_maps/prospective_precision_img_map_{}_{}_{}.pkl".format(amyloid_class, annotator, iou_threshold), "rb"))
                 mapp = {x: mapp[x] for x in mapp.keys() if mapp[x] == -1}
                 for img_name in mapp:
                     for tup in predictions[img_name]:

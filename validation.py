@@ -1,15 +1,5 @@
 """
-Script pertaining to the validation of the study after all model training 
-For Lise's dataset:
-    consensus annotations: /srv/home/lminaud/tile_seg/consensus_csv/consensus_experts/consensus_2_complete.csv
-    WSIs:
-            UCI - 24: .svs rescanned: /srv/nas/mk2/projects/alzheimers/images/UCI/UCI_svs/
-            UCLA/UCD: /srv/nas/mk2/projects/alzheimers/images/ADBrain/
-            WSIs renamed with random ID: /srv/nas/mk2/projects/alzheimers/images/processed/processed_wsi/svs/
-    1536 tiles:
-            /srv/home/lminaud/tiles_backup/
-            The csv name is: CAA_img_Daniel_project.csv
-    image_details: /srv/home/lminaud/tile_seg/image_details.csv
+Script pertaining to CERAD-like analysis and speed runs
 """
 from __future__ import division
 from models import *
@@ -34,6 +24,7 @@ from matplotlib.ticker import NullLocator
 import pickle
 import socket
 from scipy.stats import ttest_ind
+import statsmodels.stats.power as smp
 from core import *
 
 def calculatePlaqueCountsPerWSI(task, save_images=False):
@@ -236,13 +227,15 @@ def plotCERADStatisticalSignificance(plaque_type="Cored"):
             print("{} not found in WSI plaque counts dictionary".format(WSI_name))
             continue
         cerad_scores_map[row["CERAD"]].append(WSI_plaque_counts[WSI_name][plaque_type])
-    print(cerad_scores_map)
     t_test_map = {(cat1, cat2): -1 for cat1 in categories for cat2 in categories} #key: (CERAD category1, CERAD category2), value: (t-statistic, p-value) 
     grid = []
     for key in cerad_scores_map:
         l = []
         for key2 in cerad_scores_map:
             t, p = ttest_ind(cerad_scores_map[key], cerad_scores_map[key2])
+            effect_size = (np.mean(cerad_scores_map[key]) - np.mean(cerad_scores_map[key2])) / float(np.sqrt((np.std(cerad_scores_map[key])**2 + np.std(cerad_scores_map[key2])**2) / float(2))) ##Cohen's d
+            nobs = len(cerad_scores_map[key]) + len(cerad_scores_map[key2])
+            power = smp.ttest_power(effect_size, nobs=nobs, alpha=0.05, alternative='two-sided')
             t_test_map[key, key2] = float(t), float(p)
             l.append(float(p))
         grid.append(l)
@@ -262,14 +255,11 @@ def plotCERADStatisticalSignificance(plaque_type="Cored"):
                 text = ax.text(j, i, "{:.2e}".format(grid[i][j]), ha="center", va="center", color="white", fontsize=11)
             else:
                 text = ax.text(j, i, str(round(grid[i][j], 3)), ha="center", va="center", color="white", fontsize=11)
-
     cbar = ax.figure.colorbar(im, ax=ax)
     cbar.ax.tick_params(labelsize=11)
     fig.tight_layout()
     ax.set_title("t-test p-values", fontsize=12)
     plt.savefig("figures/CERAD-t-test-p-values.png", dpi=300)
-
-
 
 def getStain(string):
     """
@@ -373,9 +363,43 @@ def speedCheck(use_gpu=True, include_merge_and_filter=True):
         print("model time spent: ", model_time_spent)
         print("avg time per WSI: ", model_time_spent / float(len(WSI_directories)))
         print("avg time per 1536 image: ", model_time_spent / float(num_1536))
-    pickle.dump(time_dict, open("pickles/run_times_use_gpu_{}_{}.pkl".format(use_gpu, hostname), "wb"))
+    pickle.dump(time_dict, open("pickles/run_times_use_gpu_{}_merge_and_filter_{}_{}.pkl".format(use_gpu, include_merge_and_filter, hostname), "wb"))
 
-
+def calculateAvgSpeedOfTangSlidingWindow():
+    """
+    As first described in https://www.nature.com/articles/s41467-019-10212-1,
+    one valid approach to counting the number of Cored and CAA pathologies is to perform a sliding window approach, and then segment the resulting heatmap:
+    https://github.com/keiserlab/plaquebox-paper/blob/master/3)%20Visualization%20-%20Prediction%20Confidence%20Heatmaps.ipynb
+    This method calculates and prints the average time to draw a heatmap per WSI according to the tqdm output
+    """
+    tqdms = ["28/28 [2:24:17<00:00, 309.19s/it]",  
+            "49/49 [8:55:56<00:00, 656.25s/it]",  
+            "28/28 [2:40:59<00:00, 345.00s/it]",  
+            "28/28 [2:45:04<00:00, 353.73s/it]",  
+            "28/28 [2:45:54<00:00, 355.52s/it]",  
+            "28/28 [2:33:49<00:00, 329.63s/it]",  
+            "27/27 [2:35:41<00:00, 345.99s/it]",  
+            "26/26 [3:13:59<00:00, 447.68s/it]",  
+            "28/28 [3:08:24<00:00, 403.74s/it]",  
+            "21/21 [2:04:40<00:00, 356.22s/it]",
+            "25/25 [2:35:53<00:00, 374.13s/it]",  
+            "27/27 [2:26:48<00:00, 326.22s/it]",  
+            "31/31 [3:14:01<00:00, 375.53s/it]",  
+            "28/28 [3:23:10<00:00, 435.36s/it]",  
+            "26/26 [2:35:15<00:00, 358.28s/it]",  
+            "28/28 [2:47:33<00:00, 359.04s/it]",  
+            "28/28 [2:43:00<00:00, 349.29s/it]",  
+            "31/31 [3:25:29<00:00, 397.72s/it]",  
+            "25/25 [2:08:55<00:00, 309.42s/it]",  
+            "28/28 [2:56:10<00:00, 377.54s/it]"]
+    total_seconds = 0
+    for tqdm in tqdms:
+        time = tqdm[tqdm.find("[") + 1:tqdm.find("<")]
+        hours, minutes, seconds = time.split(":")
+        total_seconds += float(hours)*60*60 + float(minutes)*60 + float(seconds)
+    avg_seconds = total_seconds / float(len(tqdms))
+    print(avg_seconds, len(tqdms))
+   
 
 
 
@@ -385,13 +409,13 @@ os.mkdir("output/")
 # comparePreMergeLabelsWithPostMerge(sample_size=100)
 # calculatePlaqueCountsPerWSI(task="CERAD all", save_images=False)
 # calculatePlaqueCountsPerWSI(task="lise dataset")
-plotCERADVsCounts(plaque_type = "Cored", CERAD_type="CERAD")
+# plotCERADVsCounts(plaque_type = "Cored", CERAD_type="CERAD")
 # plotCERADVsCounts(plaque_type = "Cored", CERAD_type="Cored_MTG")
 # plotCERADVsCounts(plaque_type = "CAA", CERAD_type="CAA_MTG")
-plotCERADStatisticalSignificance()
-# speedCheck(use_gpu=True)
-# speedCheck(use_gpu=False)
-
+# plotCERADStatisticalSignificance()
+speedCheck(use_gpu=True, include_merge_and_filter=True)
+speedCheck(use_gpu=False, include_merge_and_filter=True)
+# calculazteAvgSpeedOfTangSlidingWindow()
 
 
 

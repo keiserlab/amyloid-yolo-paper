@@ -1,5 +1,7 @@
+"""
+pulled from https://github.com/eriklindernoren/PyTorch-YOLOv3 with small edits
+"""
 from __future__ import division
-
 from models import *
 from utils.logger import *
 from utils.utils import *
@@ -8,23 +10,19 @@ from utils.augmentations import *
 from utils.transforms import *
 from utils.parse_config import *
 from test import evaluate
-
 from terminaltables import AsciiTable
-
 import os
 import sys
 import time
 import datetime
 import argparse
 import tqdm
-
 import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision import transforms
 from torch.autograd import Variable
 import torch.optim as optim
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

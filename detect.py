@@ -1,5 +1,5 @@
 """
-https://github.com/eriklindernoren/PyTorch-YOLOv3 with small edits
+pulled from https://github.com/eriklindernoren/PyTorch-YOLOv3 with small edits
 """
 from __future__ import division
 from models import *

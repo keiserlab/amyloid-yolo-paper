@@ -1,5 +1,7 @@
 """
-Script to run analyses on the prospective validation with four neuropathologists
+Analyses for:
+    Model version 1 and version 2 benchmarking
+    The prospective validation with four neuropathologists
 """
 from __future__ import division
 from models import *
@@ -75,7 +77,6 @@ def runModelOnValidationImages(val_type="prospective"):
             save_path = path.replace("prospective_validation_images/", "")   
         else:
             save_path = path.replace("data/amyloid_test/", "")   
-        # print("(%d) Image: '%s'" % (img_i, path))
         validation_predictions_dict[save_path] = []
         img = np.array(Image.open(path))
         if detections is None:
@@ -389,7 +390,6 @@ def getInterraterAgreement(iou_threshold=0.50):
         for a2 in annotators:
             if a1 != a2 and (a1, a2) not in pairs and (a2, a1) not in pairs:
                 pairs.append((a1, a2))
-    print(pairs)
     pair_map = {pair: {amyloid_class: -1 for amyloid_class in ["Cored", "CAA"]} for pair in pairs} 
     for annotator1, annotator2 in pairs:
 
@@ -437,7 +437,6 @@ def getInterraterAgreement(iou_threshold=0.50):
         assert(a1_cored_count + a2_cored_count - overlaps_counts["Cored"] == len(a1_final_annotations["Cored"]) == len(a2_final_annotations["Cored"]))
         assert(a1_CAA_count + a2_CAA_count - overlaps_counts["CAA"] == len(a1_final_annotations["CAA"]) == len(a2_final_annotations["CAA"]) )
         for amyloid_class in ["Cored", "CAA"]:
-            print("    {}: ".format(amyloid_class), getAccuracy(a1_final_annotations[amyloid_class], a2_final_annotations[amyloid_class]))
             pair_map[(annotator1, annotator2)][amyloid_class] = getAccuracy(a1_final_annotations[amyloid_class], a2_final_annotations[amyloid_class])
     pickle.dump(pair_map, open("pickles/annotator_interrater_map_iou_{}.pkl".format(iou_threshold), "wb"))
 
@@ -446,7 +445,6 @@ def plotInterraterAgreement(iou_threshold=0.5):
     Plots a heatmap from annotator_interrater_map.pkl
     """
     pair_map = pickle.load(open("pickles/annotator_interrater_map_iou_{}.pkl".format(iou_threshold), "rb"))
-    print(pair_map)
     annotators = ["NP{}".format(i) for i in range(1, 5)]
     for amyloid_class in ["Cored", "CAA"]:
         grid = []
@@ -461,6 +459,8 @@ def plotInterraterAgreement(iou_threshold=0.5):
                     except:
                         l.append(pair_map[(a2, a1)][amyloid_class])
             grid.append(l)
+        
+        print("Average agreement for {}:{}, std:{}".format(amyloid_class, np.mean([x for x in l if x != 1.0]),np.std([x for x in l if x != 1.0])))
         fig, ax = plt.subplots()
         im = ax.imshow(grid,vmin=0, vmax=1)
         ax.set_xticks(np.arange(len(annotators)))
@@ -643,7 +643,6 @@ def plotTimeChart(iou_threshold=0.5):
         for annotator in annotators:
             x = time_map[annotator]
             y = AP_map[annotator][amyloid_class][iou_threshold]
-            print(amyloid_class, x, y)
             marker = "$*$" if amyloid_class == "Cored" else "$@$"
             if amyloid_class == "Cored": 
                 ax.scatter(x, y, s=120, marker=marker, color=color_dict[annotator], label=annotator)
@@ -746,7 +745,6 @@ def plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_pr
                     y2 = int(dictionary['y2'])
                     color = (0,0,0) 
                     cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-                    # cv2.putText(img, class_label, (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)
                     cv2.putText(img, class_symbols[class_label], (x1,y1), font, 1.5,(0,0,0),2,cv2.LINE_AA)            
             cv2.imwrite("output/{}/".format(annotator) + val_type + "_" + img_name, img)
 
@@ -886,36 +884,36 @@ def createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=0.5):
 shutil.rmtree("output/")
 os.mkdir("output/")
 
-#analysis of model v1 and v2 predictions
-for phase in ["phase1", "phase2"]:
-    convertPreProspectiveAnnotationsToPickle(phase=phase)
-    runModelOnValidationImages(val_type=phase)
-    for iou_threshold in np.arange(0.1, 1.0, 0.1):
-        compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=phase, val_type=phase)
-    plotPRC(annotator=phase, val_type=phase, separate_legend=False)
-    plotImageComparisons(val_type=phase, overlay_labels=True, overlay_predictions=True)
-plotAPsForPhases()
+# #analysis of model v1 and v2 predictions
+# for phase in ["phase1", "phase2"]:
+#     convertPreProspectiveAnnotationsToPickle(phase=phase)
+#     runModelOnValidationImages(val_type=phase)
+#     for iou_threshold in np.arange(0.1, 1.0, 0.1):
+#         compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=phase, val_type=phase)
+#     plotPRC(annotator=phase, val_type=phase, separate_legend=False)
+#     plotImageComparisons(val_type=phase, overlay_labels=True, overlay_predictions=True)
+# plotAPsForPhases()
 
-#prospective validation of model v2 predictions
-runModelOnValidationImages(val_type="prospective")
-for iou_threshold in np.arange(.1, 1, .1):
-    createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=iou_threshold)
-for annotator in ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]:
-    for iou_threshold in np.arange(0.1, 1.0, 0.1):
-        compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=annotator, val_type="prospective")
-    plotPRC(annotator=annotator, val_type="prospective")
-    getAnnotationOverlaps(annotator, iou_threshold=0.05)
-getPrecisionsOfAnnotatorsRelativeToEachOther()
-plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
-plotAPsForProspective(plotAvgOverlay=True)
-plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_predictions=True)
+# #prospective validation of model v2 predictions
+# runModelOnValidationImages(val_type="prospective")
+# for iou_threshold in np.arange(.1, 1, .1):
+#     createMergedOrConsensusBenchmark(benchmark="consensus", iou_threshold=iou_threshold)
+# for annotator in ["consensus"] + ["NP{}".format(i) for i in range(1, 5)]:
+#     for iou_threshold in np.arange(0.1, 1.0, 0.1):
+#         compareAnnotationsToPredictions(iou_threshold=iou_threshold, annotator=annotator, val_type="prospective")
+#     plotPRC(annotator=annotator, val_type="prospective")
+#     getAnnotationOverlaps(annotator, iou_threshold=0.05)
+# getPrecisionsOfAnnotatorsRelativeToEachOther()
+# plotPrecisionsOfAnnotatorsRelativeToEachOther(plotType="aggregate")
+# plotAPsForProspective(plotAvgOverlay=True)
+# plotImageComparisons(val_type="prospective", overlay_labels=True, overlay_predictions=True)
 
 ##other analyses
-findLowPerformanceImages("Cored", "consensus", iou_threshold=0.5)
-plotAllAnnotations()
-getInterraterAgreement(iou_threshold=0.5)
+# findLowPerformanceImages("Cored", "consensus", iou_threshold=0.5)
+# plotAllAnnotations()
+# getInterraterAgreement(iou_threshold=0.5)
 plotInterraterAgreement()
-plotTimeChart()
+# plotTimeChart()
 
 
 

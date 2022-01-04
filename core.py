@@ -1,3 +1,6 @@
+"""
+Contains much of the baseline code for the study and helper functions
+"""
 import csv
 import glob, os
 import cv2

@@ -3,7 +3,7 @@ author: Daniel Wong (wongdanr@gmail.com)
 
 ## Open access image data
 LINK HERE <br />
-Identifier: DOI HERE
+DOI: 10.17605/OSF.IO/FCPMW
 Please download the zip file called data.zip and place in the amyloid-yolo-paper/ directory 
 
 ## Installation Instructions:
